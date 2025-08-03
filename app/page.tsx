@@ -1,24 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import {
   CalendarDays,
-  DollarSign,
-  CreditCard,
-  Banknote,
-  ArrowUpDown,
-  Trash2,
   Plus,
-  Users,
-  Clock,
   LayoutDashboard,
   Receipt,
   BarChart3,
@@ -26,9 +12,32 @@ import {
   Menu,
   X,
   UserPlus,
+  DollarSign,
+  Banknote,
+  CreditCard,
+  ArrowUpDown,
+  Users,
+  Clock,
   Wallet,
+  Trash2,
 } from "lucide-react"
 import { format } from "date-fns"
+import {
+  getInitialData,
+  addTransactionAction,
+  deleteTransactionAction,
+  addEmpleadaAction,
+  deleteEmpleadaAction,
+  updateInitialAmountAction,
+} from "@/actions" // Import Server Actions
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
 
 interface Transaction {
   id: string
@@ -78,6 +87,7 @@ export default function SalonCashControl() {
     saldoFinal: 0,
     totalGeneral: 0,
   })
+  const [isLoading, setIsLoading] = useState(true) // New loading state
 
   const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id" | "fecha">>({
     cliente: "",
@@ -95,105 +105,56 @@ export default function SalonCashControl() {
   const [activeSection, setActiveSection] = useState<ActiveSection>("dashboard")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
-  // Helper function to calculate summary values
-  const calculateSummaryValues = (currentMontoInicial: number, currentTransactions: Transaction[]) => {
-    const totalEfectivo = currentTransactions
-      .filter((t) => t.metodoPago === "efectivo")
-      .reduce((sum, t) => sum + t.montoRecibido, 0)
-
-    const totalTransferencias = currentTransactions
-      .filter((t) => t.metodoPago === "tarjeta" || t.metodoPago === "transferencia")
-      .reduce((sum, t) => sum + t.montoRecibido, 0)
-
-    const totalDevuelto = currentTransactions.reduce((sum, t) => sum + t.cambioEntregado, 0)
-
-    const saldoFinal = currentMontoInicial + totalEfectivo - totalDevuelto
-    const totalGeneral = saldoFinal + totalTransferencias
-
-    return {
-      totalEfectivo,
-      totalTransferencias,
-      totalDevuelto,
-      saldoFinal,
-      totalGeneral,
-    }
-  }
-
-  // Cargar datos del localStorage al iniciar
+  // Cargar datos de MongoDB al iniciar
   useEffect(() => {
-    const savedTransactions = localStorage.getItem("salon-transactions")
-    const savedSummary = localStorage.getItem("salon-summary")
-    const savedEmpleadas = localStorage.getItem("salon-empleadas")
-
-    if (savedTransactions) {
-      setTransactions(JSON.parse(savedTransactions))
+    const loadData = async () => {
+      setIsLoading(true)
+      const data = await getInitialData()
+      if (data.transactions) {
+        setTransactions(data.transactions)
+      }
+      if (data.dailySummary) {
+        setDailySummary(data.dailySummary)
+        setTempInitialAmount(data.dailySummary.montoInicial) // Initialize temp amount
+      }
+      if (data.empleadas) {
+        setEmpleadas(data.empleadas)
+      }
+      setIsLoading(false)
     }
-    if (savedSummary) {
-      setDailySummary(JSON.parse(savedSummary))
-    }
-    if (savedEmpleadas) {
-      setEmpleadas(JSON.parse(savedEmpleadas))
-    }
+    loadData()
   }, [])
 
-  // Efecto para recalcular el resumen cuando cambian las transacciones o el monto inicial
-  useEffect(() => {
-    const { totalEfectivo, totalTransferencias, totalDevuelto, saldoFinal, totalGeneral } = calculateSummaryValues(
-      dailySummary.montoInicial,
-      transactions,
-    )
-
-    setDailySummary((prev) => ({
-      ...prev,
-      totalEfectivo,
-      totalTransferencias,
-      totalDevuelto,
-      saldoFinal,
-      totalGeneral,
-    }))
-  }, [transactions, dailySummary.montoInicial]) // Dependencias: transacciones y montoInicial
-
-  // Efecto para guardar todas las transacciones en localStorage
-  useEffect(() => {
-    localStorage.setItem("salon-transactions", JSON.stringify(transactions))
-  }, [transactions])
-
-  // Efecto para guardar todo el dailySummary en localStorage cuando cambie
-  useEffect(() => {
-    localStorage.setItem("salon-summary", JSON.stringify(dailySummary))
-  }, [dailySummary])
-
-  // Guardar empleadas en localStorage
-  useEffect(() => {
-    localStorage.setItem("salon-empleadas", JSON.stringify(empleadas))
-  }, [empleadas])
-
   // Agregar nueva empleada
-  const addEmpleada = () => {
+  const addEmpleada = async () => {
     if (!newEmpleada.trim()) {
       alert("Por favor ingrese el nombre de la empleada")
       return
     }
 
-    const empleada: Empleada = {
-      id: Date.now().toString(),
-      nombre: newEmpleada.trim(),
-      fechaRegistro: format(new Date(), "dd/MM/yyyy"),
+    const result = await addEmpleadaAction(newEmpleada)
+    if (result.success && result.empleada) {
+      setEmpleadas((prev) => [...prev, result.empleada])
+      setNewEmpleada("")
+    } else {
+      alert(`Error al agregar empleada: ${result.error}`)
     }
-
-    setEmpleadas([...empleadas, empleada])
-    setNewEmpleada("")
   }
 
   // Eliminar empleada
-  const deleteEmpleada = (id: string) => {
+  const deleteEmpleada = async (id: string) => {
     if (confirm("¿Estás seguro de que quieres eliminar esta empleada?")) {
-      setEmpleadas(empleadas.filter((e) => e.id !== id))
+      const result = await deleteEmpleadaAction(id)
+      if (result.success) {
+        setEmpleadas((prev) => prev.filter((e) => e.id !== id))
+      } else {
+        alert(`Error al eliminar empleada: ${result.error}`)
+      }
     }
   }
 
   // Agregar nueva transacción
-  const addTransaction = () => {
+  const addTransaction = async () => {
     if (!newTransaction.cliente || !newTransaction.quienAtendio) {
       alert("Por favor complete los campos obligatorios")
       return
@@ -209,10 +170,8 @@ export default function SalonCashControl() {
       montoRecibidoFinal = newTransaction.montoRecibido
     }
 
-    const transaction: Transaction = {
+    const transactionDataToSend = {
       ...newTransaction,
-      id: Date.now().toString(),
-      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"),
       montoRecibido: montoRecibidoFinal,
       cambioEntregado:
         newTransaction.metodoPago === "efectivo"
@@ -220,30 +179,38 @@ export default function SalonCashControl() {
           : 0,
     }
 
-    setTransactions([...transactions, transaction])
-    setNewTransaction({
-      cliente: "",
-      metodoPago: "efectivo",
-      montoRecibido: 0,
-      montoServicio: 0,
-      cambioEntregado: 0,
-      quienAtendio: "",
-      observaciones: "",
-    })
-
-    // Cambiar a la sección de transacciones después de agregar
-    setActiveSection("transacciones")
+    const result = await addTransactionAction(transactionDataToSend)
+    if (result.success && result.transaction) {
+      setTransactions((prev) => [...prev, result.transaction])
+      // Re-fetch summary to get updated totals
+      const updatedData = await getInitialData()
+      if (updatedData.dailySummary) {
+        setDailySummary(updatedData.dailySummary)
+      }
+      setNewTransaction({
+        cliente: "",
+        metodoPago: "efectivo",
+        montoRecibido: 0,
+        montoServicio: 0,
+        cambioEntregado: 0,
+        quienAtendio: "",
+        observaciones: "",
+      })
+      setActiveSection("transacciones")
+    } else {
+      alert(`Error al agregar transacción: ${result.error}`)
+    }
   }
 
   // Actualizar monto inicial
-  const updateInitialAmount = () => {
-    const newMontoInicial = tempInitialAmount
-    setDailySummary((prev) => ({
-      ...prev,
-      montoInicial: newMontoInicial,
-    }))
-    setIsEditingInitialAmount(false)
-    // Los useEffects se encargarán de recalcular y persistir
+  const updateInitialAmount = async () => {
+    const result = await updateInitialAmountAction(tempInitialAmount)
+    if (result.success && result.dailySummary) {
+      setDailySummary(result.dailySummary)
+      setIsEditingInitialAmount(false)
+    } else {
+      alert(`Error al actualizar monto inicial: ${result.error}`)
+    }
   }
 
   // Cancelar edición del monto inicial
@@ -253,17 +220,29 @@ export default function SalonCashControl() {
   }
 
   // Eliminar transacción
-  const deleteTransaction = (id: string) => {
-    setTransactions(transactions.filter((t) => t.id !== id))
+  const deleteTransaction = async (id: string) => {
+    if (confirm("¿Estás seguro de que quieres eliminar esta transacción?")) {
+      const result = await deleteTransactionAction(id)
+      if (result.success) {
+        setTransactions((prev) => prev.filter((t) => t.id !== id))
+        // Re-fetch summary to get updated totals
+        const updatedData = await getInitialData()
+        if (updatedData.dailySummary) {
+          setDailySummary(updatedData.dailySummary)
+        }
+      } else {
+        alert(`Error al eliminar transacción: ${result.error}`)
+      }
+    }
   }
 
   // Formatear moneda
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = useCallback((amount: number) => {
     return `RD$${amount.toLocaleString("es-DO", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`
-  }
+  }, [])
 
   // Exportar a PDF
   const exportToPDF = async () => {
@@ -347,6 +326,7 @@ export default function SalonCashControl() {
           "Método de Pago",
           "Monto Recibido",
           "Monto Servicio",
+          "Recargo",
           "Cambio",
           "Quien Atendió",
           "Observaciones",
@@ -360,6 +340,7 @@ export default function SalonCashControl() {
           transaction.metodoPago,
           transaction.montoRecibido,
           transaction.montoServicio,
+          transaction.metodoPago === "tarjeta" ? (transaction.montoServicio * 0.05).toFixed(2) : "0.00",
           transaction.cambioEntregado,
           transaction.quienAtendio,
           transaction.observaciones,
@@ -424,7 +405,6 @@ export default function SalonCashControl() {
     return item ? item.label : "Dashboard"
   }
 
-  // Renderizar contenido según la sección activa
   const renderContent = () => {
     switch (activeSection) {
       case "dashboard":
@@ -946,7 +926,7 @@ export default function SalonCashControl() {
                         type="number"
                         value={tempInitialAmount}
                         onChange={(e) => setTempInitialAmount(Number.parseFloat(e.target.value) || 0)}
-                        className="text-lg font-bold max-w-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500" // Added class for active input
+                        className="text-lg font-bold max-w-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500"
                       />
                       <div className="flex gap-2">
                         <Button size="sm" onClick={updateInitialAmount}>
@@ -962,9 +942,9 @@ export default function SalonCashControl() {
                       <div className="text-2xl font-bold">{formatCurrency(dailySummary.montoInicial)}</div>
                       <Button
                         size="sm"
-                        variant="outline" // Changed to outline for better visibility
+                        variant="outline"
                         onClick={() => setIsEditingInitialAmount(true)}
-                        className="mt-1 text-xs" // Kept original text-xs for size
+                        className="mt-1 text-xs"
                       >
                         Editar Monto
                       </Button>
@@ -990,6 +970,14 @@ export default function SalonCashControl() {
       default:
         return null
     }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-lg font-semibold text-gray-700">Cargando datos...</div>
+      </div>
+    )
   }
 
   return (
