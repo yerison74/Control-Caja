@@ -95,6 +95,30 @@ export default function SalonCashControl() {
   const [activeSection, setActiveSection] = useState<ActiveSection>("dashboard")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
+  // Helper function to calculate summary values
+  const calculateSummaryValues = (currentMontoInicial: number, currentTransactions: Transaction[]) => {
+    const totalEfectivo = currentTransactions
+      .filter((t) => t.metodoPago === "efectivo")
+      .reduce((sum, t) => sum + t.montoRecibido, 0)
+
+    const totalTransferencias = currentTransactions
+      .filter((t) => t.metodoPago === "tarjeta" || t.metodoPago === "transferencia")
+      .reduce((sum, t) => sum + t.montoRecibido, 0)
+
+    const totalDevuelto = currentTransactions.reduce((sum, t) => sum + t.cambioEntregado, 0)
+
+    const saldoFinal = currentMontoInicial + totalEfectivo - totalDevuelto
+    const totalGeneral = saldoFinal + totalTransferencias
+
+    return {
+      totalEfectivo,
+      totalTransferencias,
+      totalDevuelto,
+      saldoFinal,
+      totalGeneral,
+    }
+  }
+
   // Cargar datos del localStorage al iniciar
   useEffect(() => {
     const savedTransactions = localStorage.getItem("salon-transactions")
@@ -112,44 +136,37 @@ export default function SalonCashControl() {
     }
   }, [])
 
-  // Guardar en localStorage cuando cambien las transacciones
+  // Efecto para recalcular el resumen cuando cambian las transacciones o el monto inicial
   useEffect(() => {
-    localStorage.setItem("salon-transactions", JSON.stringify(transactions))
-    calculateSummary()
-  }, [transactions])
+    const { totalEfectivo, totalTransferencias, totalDevuelto, saldoFinal, totalGeneral } = calculateSummaryValues(
+      dailySummary.montoInicial,
+      transactions,
+    )
 
-  // Guardar empleadas en localStorage
-  useEffect(() => {
-    localStorage.setItem("salon-empleadas", JSON.stringify(empleadas))
-  }, [empleadas])
-
-  // Calcular resumen diario
-  const calculateSummary = () => {
-    const totalEfectivo = transactions
-      .filter((t) => t.metodoPago === "efectivo")
-      .reduce((sum, t) => sum + t.montoRecibido, 0)
-
-    const totalTransferencias = transactions
-      .filter((t) => t.metodoPago === "tarjeta" || t.metodoPago === "transferencia")
-      .reduce((sum, t) => sum + t.montoRecibido, 0)
-
-    const totalDevuelto = transactions.reduce((sum, t) => sum + t.cambioEntregado, 0)
-
-    const saldoFinal = dailySummary.montoInicial + totalEfectivo - totalDevuelto
-    const totalGeneral = saldoFinal + totalTransferencias
-
-    const updatedSummary = {
-      ...dailySummary,
+    setDailySummary((prev) => ({
+      ...prev,
       totalEfectivo,
       totalTransferencias,
       totalDevuelto,
       saldoFinal,
       totalGeneral,
-    }
+    }))
+  }, [transactions, dailySummary.montoInicial]) // Dependencias: transacciones y montoInicial
 
-    setDailySummary(updatedSummary)
-    localStorage.setItem("salon-summary", JSON.stringify(updatedSummary))
-  }
+  // Efecto para guardar todas las transacciones en localStorage
+  useEffect(() => {
+    localStorage.setItem("salon-transactions", JSON.stringify(transactions))
+  }, [transactions])
+
+  // Efecto para guardar todo el dailySummary en localStorage cuando cambie
+  useEffect(() => {
+    localStorage.setItem("salon-summary", JSON.stringify(dailySummary))
+  }, [dailySummary])
+
+  // Guardar empleadas en localStorage
+  useEffect(() => {
+    localStorage.setItem("salon-empleadas", JSON.stringify(empleadas))
+  }, [empleadas])
 
   // Agregar nueva empleada
   const addEmpleada = () => {
@@ -220,11 +237,13 @@ export default function SalonCashControl() {
 
   // Actualizar monto inicial
   const updateInitialAmount = () => {
-    const updatedSummary = { ...dailySummary, montoInicial: tempInitialAmount }
-    setDailySummary(updatedSummary)
-    localStorage.setItem("salon-summary", JSON.stringify(updatedSummary))
+    const newMontoInicial = tempInitialAmount
+    setDailySummary((prev) => ({
+      ...prev,
+      montoInicial: newMontoInicial,
+    }))
     setIsEditingInitialAmount(false)
-    calculateSummary()
+    // Los useEffects se encargarán de recalcular y persistir
   }
 
   // Cancelar edición del monto inicial
@@ -927,7 +946,7 @@ export default function SalonCashControl() {
                         type="number"
                         value={tempInitialAmount}
                         onChange={(e) => setTempInitialAmount(Number.parseFloat(e.target.value) || 0)}
-                        className="text-lg font-bold max-w-xs"
+                        className="text-lg font-bold max-w-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500" // Added class for active input
                       />
                       <div className="flex gap-2">
                         <Button size="sm" onClick={updateInitialAmount}>
@@ -941,8 +960,13 @@ export default function SalonCashControl() {
                   ) : (
                     <div className="flex items-center gap-4">
                       <div className="text-2xl font-bold">{formatCurrency(dailySummary.montoInicial)}</div>
-                      <Button size="sm" variant="outline" onClick={() => setIsEditingInitialAmount(true)}>
-                        Editar
+                      <Button
+                        size="sm"
+                        variant="outline" // Changed to outline for better visibility
+                        onClick={() => setIsEditingInitialAmount(true)}
+                        className="mt-1 text-xs" // Kept original text-xs for size
+                      >
+                        Editar Monto
                       </Button>
                     </div>
                   )}
