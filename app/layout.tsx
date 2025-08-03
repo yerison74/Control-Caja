@@ -4,9 +4,9 @@ import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Control De Caja',
-  description: 'Creado por Yerison',
-  generator: 'version 11.2',
+  title: 'v0 App',
+  description: 'Created with v0',
+  generator: 'v0.dev',
 }
 
 export default function RootLayout({
@@ -25,12 +25,7 @@ html {
 }
         `}</style>
       </head>
-      <body>{children}
-         {/* Footer */}
-        <footer className="text-center text-sm text-gray-500 py-4 border-t mt-8">
-          © 2025 Derechos reservados – Yerison Javier
-        </footer>
-      </body>
+      <body>{children}</body>
     </html>
   )
 }

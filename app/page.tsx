@@ -38,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog" // Import Dialog components
 
 interface Transaction {
   id: string
@@ -104,6 +105,10 @@ export default function SalonCashControl() {
   const [tempInitialAmount, setTempInitialAmount] = useState(dailySummary.montoInicial)
   const [activeSection, setActiveSection] = useState<ActiveSection>("dashboard")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  // New states for observation dialog
+  const [showObservationDialog, setShowObservationDialog] = useState(false)
+  const [selectedObservation, setSelectedObservation] = useState("")
 
   // Cargar datos de MongoDB al iniciar
   useEffect(() => {
@@ -796,7 +801,28 @@ export default function SalonCashControl() {
                         </TableCell>
                         <TableCell>{formatCurrency(transaction.cambioEntregado)}</TableCell>
                         <TableCell>{transaction.quienAtendio}</TableCell>
-                        <TableCell className="max-w-xs truncate">{transaction.observaciones}</TableCell>
+                        <TableCell className="max-w-xs">
+                          {transaction.observaciones.length > 50 ? (
+                            <div className="flex items-center">
+                              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                                {transaction.observaciones.substring(0, 47)}...
+                              </span>
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="p-0 h-auto text-blue-600 hover:text-blue-800 ml-1 flex-shrink-0"
+                                onClick={() => {
+                                  setSelectedObservation(transaction.observaciones)
+                                  setShowObservationDialog(true)
+                                }}
+                              >
+                                Ver más
+                              </Button>
+                            </div>
+                          ) : (
+                            transaction.observaciones
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Button
                             variant="outline"
@@ -819,6 +845,19 @@ export default function SalonCashControl() {
                   </TableBody>
                 </Table>
               </div>
+
+              {/* Dialog for full observation */}
+              <Dialog open={showObservationDialog} onOpenChange={setShowObservationDialog}>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Observación Completa</DialogTitle>
+                    <DialogDescription>Detalles completos de la observación de la transacción.</DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedObservation}</p>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </CardContent>
           </Card>
         )
