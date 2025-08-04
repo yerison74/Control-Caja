@@ -39,6 +39,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog" // Import Dialog components
+import "jspdf-autotable" // Import the plugin
 
 interface Transaction {
   id: string
@@ -252,48 +253,215 @@ export default function SalonCashControl() {
   // Exportar a PDF
   const exportToPDF = async () => {
     const { jsPDF } = await import("jspdf")
+
     const doc = new jsPDF()
 
-    // Título
-    doc.setFontSize(20)
-    doc.text("Control de Caja - Salón", 20, 20)
+    // Define colors (RGB values)
+    const primaryGreen = [74, 222, 128] // Tailwind green-500
+    const secondaryBlue = [59, 130, 246] // Tailwind blue-500
+    const accentPurple = [168, 85, 247] // Tailwind purple-500
+    const textColor = [55, 65, 81] // Tailwind gray-700
+    const headerBg = [243, 244, 246] // Tailwind gray-100
+    const lightGray = [240, 240, 240] // For table rows
+
+    doc.setTextColor(textColor[0], textColor[1], textColor[2])
+
+    // --- Header ---
+    doc.setFontSize(24)
+    doc.setFont("helvetica", "bold")
+    doc.text("Reporte Diario de Caja - Salón", 20, 25)
+
     doc.setFontSize(12)
-    doc.text(`Fecha: ${dailySummary.fecha}`, 20, 35)
+    doc.setFont("helvetica", "normal")
+    doc.text(`Fecha del Reporte: ${dailySummary.fecha}`, 20, 35)
+    doc.text(`Generado el: ${format(new Date(), "dd/MM/yyyy hh:mm a")}`, 20, 42)
 
-    // Resumen
-    doc.setFontSize(14)
-    doc.text("RESUMEN DEL DÍA", 20, 55)
-    doc.setFontSize(10)
-    doc.text(`Monto Inicial: ${formatCurrency(dailySummary.montoInicial)}`, 20, 70)
-    doc.text(`Total en Caja (Efectivo): ${formatCurrency(dailySummary.saldoFinal)}`, 20, 80)
-    doc.text(`Total Transferencias: ${formatCurrency(dailySummary.totalTransferencias)}`, 20, 90)
-    doc.text(`Total Devuelto: ${formatCurrency(dailySummary.totalDevuelto)}`, 20, 100)
-    doc.text(`TOTAL GENERAL: ${formatCurrency(dailySummary.totalGeneral)}`, 20, 110)
-    doc.text(`Total de Transacciones: ${transactions.length}`, 20, 120)
+    // --- Resumen Financiero del Día ---
+    let yOffset = 60
+    doc.setFontSize(18)
+    doc.setFont("helvetica", "bold")
+    doc.text("RESUMEN FINANCIERO DEL DÍA", 20, yOffset)
+    yOffset += 10
 
-    // Transacciones
-    if (transactions.length > 0) {
-      doc.setFontSize(14)
-      doc.text("TRANSACCIONES", 20, 140)
-      doc.setFontSize(8)
+    // Summary Cards (simulated with rectangles and text)
+    const cardWidth = 45
+    const cardHeight = 25
+    const cardSpacing = 5
+    let currentX = 20
 
-      let yPos = 155
-      transactions.forEach((transaction, index) => {
-        if (yPos > 270) {
-          doc.addPage()
-          yPos = 20
-        }
+    // Monto Inicial
+    doc.setFillColor(230, 230, 250) // Light purple
+    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+    doc.setTextColor(accentPurple[0], accentPurple[1], accentPurple[2])
+    doc.setFontSize(8)
+    doc.text("Monto Inicial", currentX + 2, yOffset + 7)
+    doc.setFontSize(12)
+    doc.text(formatCurrency(dailySummary.montoInicial), currentX + 2, yOffset + 17)
+    currentX += cardWidth + cardSpacing
 
-        doc.text(`${index + 1}. ${transaction.cliente}`, 20, yPos)
-        doc.text(`${transaction.fecha.split(" ").slice(-2).join(" ")}`, 70, yPos)
-        doc.text(`${transaction.metodoPago.toUpperCase()}`, 110, yPos)
-        doc.text(`${formatCurrency(transaction.montoRecibido)}`, 140, yPos)
-        doc.text(`${transaction.quienAtendio}`, 170, yPos)
-        yPos += 10
-      })
-    }
+    // Total Efectivo
+    doc.setFillColor(200, 250, 200) // Light green
+    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+    doc.setTextColor(primaryGreen[0], primaryGreen[1], primaryGreen[2])
+    doc.setFontSize(8)
+    doc.text("Total Efectivo", currentX + 2, yOffset + 7)
+    doc.setFontSize(12)
+    doc.text(formatCurrency(dailySummary.totalEfectivo), currentX + 2, yOffset + 17)
+    currentX += cardWidth + cardSpacing
 
-    doc.save(`control-caja-${dailySummary.fecha.replace(/\//g, "-")}.pdf`)
+    // Total Transferencias
+    doc.setFillColor(200, 220, 255) // Light blue
+    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+    doc.setTextColor(secondaryBlue[0], secondaryBlue[1], secondaryBlue[2])
+    doc.setFontSize(8)
+    doc.text("Total Transferencias", currentX + 2, yOffset + 7)
+    doc.setFontSize(12)
+    doc.text(formatCurrency(dailySummary.totalTransferencias), currentX + 2, yOffset + 17)
+    currentX += cardWidth + cardSpacing
+
+    // Total Devuelto
+    doc.setFillColor(255, 200, 200) // Light red
+    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+    doc.setTextColor(255, 0, 0) // Red
+    doc.setFontSize(8)
+    doc.text("Total Devuelto", currentX + 2, yOffset + 7)
+    doc.setFontSize(12)
+    doc.text(formatCurrency(dailySummary.totalDevuelto), currentX + 2, yOffset + 17)
+    currentX = 20 // Reset X for next row if needed
+    yOffset += cardHeight + cardSpacing + 5 // Move down for next section
+
+    // Total en Caja (Efectivo) - Highlighted
+    doc.setFillColor(primaryGreen[0], primaryGreen[1], primaryGreen[2]) // Green background
+    doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
+    doc.setTextColor(255, 255, 255) // White text
+    doc.setFontSize(12)
+    doc.text("TOTAL EN CAJA (EFECTIVO)", currentX + 5, yOffset + 10)
+    doc.setFontSize(20)
+    doc.text(formatCurrency(dailySummary.saldoFinal), currentX + 5, yOffset + 23)
+    yOffset += 30 + cardSpacing
+
+    // TOTAL GENERAL - Highlighted
+    doc.setFillColor(accentPurple[0], accentPurple[1], accentPurple[2]) // Purple background
+    doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
+    doc.setTextColor(255, 255, 255) // White text
+    doc.setFontSize(12)
+    doc.text("TOTAL GENERAL DEL DÍA", currentX + 5, yOffset + 10)
+    doc.setFontSize(20)
+    doc.text(formatCurrency(dailySummary.totalGeneral), currentX + 5, yOffset + 23)
+    yOffset += 30 + 15 // Move down for next section
+
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]) // Reset text color
+
+    // --- Detalle de Transacciones ---
+    doc.setFontSize(18)
+    doc.setFont("helvetica", "bold")
+    doc.text("DETALLE DE TRANSACCIONES", 20, yOffset)
+    yOffset += 10
+
+    const transactionsData = transactions.map((t) => [
+      t.cliente,
+      t.fecha
+        .split(" ")
+        .slice(-2)
+        .join(" "), // Hora
+      t.metodoPago === "efectivo" ? "Efectivo" : t.metodoPago === "tarjeta" ? "Tarjeta" : "Transferencia",
+      formatCurrency(t.montoRecibido),
+      formatCurrency(t.montoServicio),
+      t.metodoPago === "tarjeta" ? formatCurrency(t.montoServicio * 0.05) : "-",
+      formatCurrency(t.cambioEntregado),
+      t.quienAtendio,
+      t.observaciones,
+    ])
+
+    doc.autoTable({
+      startY: yOffset,
+      head: [["Cliente", "Hora", "Método", "Recibido", "Servicio", "Recargo", "Cambio", "Atendió", "Observaciones"]],
+      body: transactionsData,
+      theme: "striped", // Modern look with alternating row colors
+      headStyles: {
+        fillColor: headerBg, // Light gray header
+        textColor: textColor,
+        fontStyle: "bold",
+        fontSize: 8,
+      },
+      styles: {
+        fontSize: 7,
+        cellPadding: 2,
+        overflow: "linebreak", // Handle long text
+        halign: "left",
+      },
+      columnStyles: {
+        0: { cellWidth: 25 }, // Cliente
+        1: { cellWidth: 15 }, // Hora
+        2: { cellWidth: 15 }, // Método
+        3: { cellWidth: 18 }, // Recibido
+        4: { cellWidth: 18 }, // Servicio
+        5: { cellWidth: 15 }, // Recargo
+        6: { cellWidth: 15 }, // Cambio
+        7: { cellWidth: 20 }, // Atendió
+        8: { cellWidth: 30 }, // Observaciones
+      },
+      didDrawPage: (data: any) => {
+        // Footer for page numbers
+        doc.setFontSize(8)
+        doc.text(
+          "Página " + doc.internal.getNumberOfPages(),
+          doc.internal.pageSize.width - 20,
+          doc.internal.pageSize.height - 10,
+          { align: "right" },
+        )
+      },
+    })
+
+    yOffset = (doc as any).autoTable.previous.finalY + 15 // Update yOffset after table
+
+    // --- Estadísticas de Empleadas ---
+    doc.setFontSize(18)
+    doc.setFont("helvetica", "bold")
+    doc.text("ESTADÍSTICAS DE EMPLEADAS", 20, yOffset)
+    yOffset += 10
+
+    const clientesPorEmpleada = transactions.reduce(
+      (acc, transaction) => {
+        acc[transaction.quienAtendio] = (acc[transaction.quienAtendio] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    const employeeStatsData = empleadas.map((empleada) => [empleada.nombre, clientesPorEmpleada[empleada.nombre] || 0])
+
+    doc.autoTable({
+      startY: yOffset,
+      head: [["Empleada", "Clientes Atendidos"]],
+      body: employeeStatsData,
+      theme: "striped",
+      headStyles: {
+        fillColor: headerBg,
+        textColor: textColor,
+        fontStyle: "bold",
+        fontSize: 8,
+      },
+      styles: {
+        fontSize: 8,
+        cellPadding: 2,
+      },
+      columnStyles: {
+        0: { cellWidth: 80 },
+        1: { cellWidth: 40, halign: "center" },
+      },
+      didDrawPage: (data: any) => {
+        doc.setFontSize(8)
+        doc.text(
+          "Página " + doc.internal.getNumberOfPages(),
+          doc.internal.pageSize.width - 20,
+          doc.internal.pageSize.height - 10,
+          { align: "right" },
+        )
+      },
+    })
+
+    doc.save(`reporte-salon-${dailySummary.fecha.replace(/\//g, "-")}.pdf`)
   }
 
   // Exportar a Excel
