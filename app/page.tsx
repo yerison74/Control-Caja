@@ -21,8 +21,12 @@ import {
   Wallet,
   Trash2,
   MinusCircle,
+  CalendarIcon,
 } from "lucide-react"
-import { format } from "date-fns"
+import { format, isToday } from "date-fns" // Importar parseISO y isToday
+import { es } from "date-fns/locale" // Importar locale español para date-fns
+import { cn } from "@/lib/utils" // Importar cn para combinar clases
+
 import {
   getInitialData,
   addTransactionAction,
@@ -30,8 +34,8 @@ import {
   addEmpleadaAction,
   deleteEmpleadaAction,
   updateInitialAmountAction,
-  addExpenseAction, // Importar nueva acción
-  deleteExpenseAction, // Importar nueva acción
+  addExpenseAction,
+  deleteExpenseAction,
 } from "@/actions" // Import Server Actions
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,6 +46,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog" // Import Dialog components
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover" // Importar Popover
+import { Calendar } from "@/components/ui/calendar" // Importar Calendar de shadcn/ui
 
 interface Transaction {
   id: string
@@ -68,7 +74,7 @@ interface DailySummary {
   totalEfectivo: number
   totalTransferencias: number
   totalDevuelto: number
-  totalGastosImprevistos: number // Nuevo campo
+  totalGastosImprevistos: number
   saldoFinal: number
   totalGeneral: number
 }
@@ -86,11 +92,11 @@ type ActiveSection =
   | "estadisticas"
   | "empleadas"
   | "configuracion"
-  | "gastos-imprevistos" // Nueva sección
+  | "gastos-imprevistos"
 
 export default function SalonCashControl() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [expenses, setExpenses] = useState<Expense[]>([]) // Nuevo estado para gastos
+  const [expenses, setExpenses] = useState<Expense[]>([])
   const [empleadas, setEmpleadas] = useState<Empleada[]>([])
   const [dailySummary, setDailySummary] = useState<DailySummary>({
     fecha: format(new Date(), "dd/MM/yyyy"),
@@ -98,11 +104,16 @@ export default function SalonCashControl() {
     totalEfectivo: 0,
     totalTransferencias: 0,
     totalDevuelto: 0,
-    totalGastosImprevistos: 0, // Inicializar nuevo campo
+    totalGastosImprevistos: 0,
     saldoFinal: 0,
     totalGeneral: 0,
   })
-  const [isLoading, setIsLoading] = useState(true) // New loading state
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Nuevo estado para la fecha seleccionada (objeto Date)
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
+  // Estado para mostrar la fecha formateada en la UI
+  const [displayDate, setDisplayDate] = useState<string>(format(new Date(), "dd/MM/yyyy"))
 
   const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id" | "fecha">>({
     cliente: "",
@@ -115,7 +126,6 @@ export default function SalonCashControl() {
   })
 
   const [newExpense, setNewExpense] = useState<Omit<Expense, "id" | "fecha">>({
-    // Nuevo estado para nuevo gasto
     monto: 0,
     descripcion: "",
   })
@@ -126,33 +136,39 @@ export default function SalonCashControl() {
   const [activeSection, setActiveSection] = useState<ActiveSection>("dashboard")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
-  // New states for observation dialog
   const [showObservationDialog, setShowObservationDialog] = useState(false)
   const [selectedObservation, setSelectedObservation] = useState("")
 
-  // Cargar datos de MongoDB al iniciar
+  // Cargar datos de MongoDB al iniciar o cuando cambia la fecha seleccionada
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true)
-      const data = await getInitialData()
+      const dateString = selectedDate ? format(selectedDate, "dd/MM/yyyy") : format(new Date(), "dd/MM/yyyy")
+      setDisplayDate(dateString) // Actualiza la fecha mostrada
+
+      const data = await getInitialData(dateString) // Pasa la fecha a la acción
       if (data.transactions) {
         setTransactions(data.transactions)
       }
       if (data.dailySummary) {
         setDailySummary(data.dailySummary)
-        setTempInitialAmount(data.dailySummary.montoInicial) // Initialize temp amount
+        setTempInitialAmount(data.dailySummary.montoInicial)
       }
       if (data.empleadas) {
         setEmpleadas(data.empleadas)
       }
       if (data.expenses) {
-        // Cargar gastos
         setExpenses(data.expenses)
       }
       setIsLoading(false)
     }
     loadData()
-  }, [])
+  }, [selectedDate]) // Dependencia de selectedDate
+
+  // Función para volver al día actual
+  const goToCurrentDay = () => {
+    setSelectedDate(new Date())
+  }
 
   // Agregar nueva empleada
   const addEmpleada = async () => {
@@ -189,13 +205,10 @@ export default function SalonCashControl() {
       return
     }
 
-    // Calcular monto recibido correctamente según el método de pago
     let montoRecibidoFinal: number
     if (newTransaction.metodoPago === "tarjeta") {
-      // Para tarjetas, el monto recibido es el servicio + 5%
       montoRecibidoFinal = newTransaction.montoServicio * 1.05
     } else {
-      // Para efectivo y transferencias, usar el monto que ingresó el usuario
       montoRecibidoFinal = newTransaction.montoRecibido
     }
 
@@ -210,14 +223,15 @@ export default function SalonCashControl() {
 
     const result = await addTransactionAction(transactionDataToSend)
     if (result.success && result.transaction) {
-      setTransactions((prev) => [...prev, result.transaction])
-      // Re-fetch summary to get updated totals
-      const updatedData = await getInitialData()
+      // Después de agregar, recargar los datos del día actual para reflejar el cambio
+      const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+      if (updatedData.transactions) {
+        setTransactions(updatedData.transactions)
+      }
       if (updatedData.dailySummary) {
         setDailySummary(updatedData.dailySummary)
       }
       if (updatedData.expenses) {
-        // Actualizar gastos también
         setExpenses(updatedData.expenses)
       }
       setNewTransaction({
@@ -230,6 +244,7 @@ export default function SalonCashControl() {
         observaciones: "",
       })
       setActiveSection("transacciones")
+      setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
     } else {
       alert(`Error al agregar transacción: ${result.error}`)
     }
@@ -244,17 +259,19 @@ export default function SalonCashControl() {
 
     const result = await addExpenseAction(newExpense)
     if (result.success && result.expense) {
-      setExpenses((prev) => [...prev, result.expense])
-      // Re-fetch summary to get updated totals
-      const updatedData = await getInitialData()
+      // Después de agregar, recargar los datos del día actual para reflejar el cambio
+      const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+      if (updatedData.expenses) {
+        setExpenses(updatedData.expenses)
+      }
       if (updatedData.dailySummary) {
         setDailySummary(updatedData.dailySummary)
       }
       if (updatedData.transactions) {
-        // Actualizar transacciones también
         setTransactions(updatedData.transactions)
       }
       setNewExpense({ monto: 0, descripcion: "" })
+      setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
     } else {
       alert(`Error al agregar gasto: ${result.error}`)
     }
@@ -265,16 +282,18 @@ export default function SalonCashControl() {
     if (confirm("¿Estás seguro de que quieres eliminar este gasto?")) {
       const result = await deleteExpenseAction(id)
       if (result.success) {
-        setExpenses((prev) => prev.filter((e) => e.id !== id))
-        // Re-fetch summary to get updated totals
-        const updatedData = await getInitialData()
+        // Después de eliminar, recargar los datos del día actual para reflejar el cambio
+        const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+        if (updatedData.expenses) {
+          setExpenses(updatedData.expenses)
+        }
         if (updatedData.dailySummary) {
           setDailySummary(updatedData.dailySummary)
         }
         if (updatedData.transactions) {
-          // Actualizar transacciones también
           setTransactions(updatedData.transactions)
         }
+        setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
       } else {
         alert(`Error al eliminar gasto: ${result.error}`)
       }
@@ -285,8 +304,19 @@ export default function SalonCashControl() {
   const updateInitialAmount = async () => {
     const result = await updateInitialAmountAction(tempInitialAmount)
     if (result.success && result.dailySummary) {
-      setDailySummary(result.dailySummary)
+      // Después de actualizar, recargar los datos del día actual para reflejar el cambio
+      const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+      if (updatedData.dailySummary) {
+        setDailySummary(updatedData.dailySummary)
+      }
+      if (updatedData.transactions) {
+        setTransactions(updatedData.transactions)
+      }
+      if (updatedData.expenses) {
+        setExpenses(updatedData.expenses)
+      }
       setIsEditingInitialAmount(false)
+      setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
     } else {
       alert(`Error al actualizar monto inicial: ${result.error}`)
     }
@@ -303,16 +333,18 @@ export default function SalonCashControl() {
     if (confirm("¿Estás seguro de que quieres eliminar esta transacción?")) {
       const result = await deleteTransactionAction(id)
       if (result.success) {
-        setTransactions((prev) => prev.filter((t) => t.id !== id))
-        // Re-fetch summary to get updated totals
-        const updatedData = await getInitialData()
+        // Después de eliminar, recargar los datos del día actual para reflejar el cambio
+        const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+        if (updatedData.transactions) {
+          setTransactions(updatedData.transactions)
+        }
         if (updatedData.dailySummary) {
           setDailySummary(updatedData.dailySummary)
         }
         if (updatedData.expenses) {
-          // Actualizar gastos también
           setExpenses(updatedData.expenses)
         }
+        setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
       } else {
         alert(`Error al eliminar transacción: ${result.error}`)
       }
@@ -330,32 +362,23 @@ export default function SalonCashControl() {
   // Exportar a PDF
   const exportToPDF = async () => {
     try {
-      console.log("Iniciando exportación a PDF (alternativa con manejo de finalY)...")
+      console.log("Iniciando exportación a PDF...")
 
-      // Importar jsPDF
       const { jsPDF } = await import("jspdf")
-      console.log("jsPDF importado:", jsPDF)
-
-      // Importar autoTable directamente como una función
       const { default: autoTable } = await import("jspdf-autotable")
-      console.log("autoTable importado:", autoTable)
 
-      // Verificar si autoTable es una función
       if (typeof autoTable !== "function") {
         console.error("Error: autoTable NO es una función después de la importación.")
         throw new Error("La función autoTable no se cargó correctamente.")
       }
-      console.log("autoTable está disponible y es una función.")
 
       const doc = new jsPDF()
-      console.log("Instancia de jsPDF creada:", doc)
 
-      // Define colors (RGB values)
-      const primaryGreen = [74, 222, 128] // Tailwind green-500
-      const secondaryBlue = [59, 130, 246] // Tailwind blue-500
-      const accentPurple = [168, 85, 247] // Tailwind purple-500
-      const textColor = [55, 65, 81] // Tailwind gray-700
-      const headerBg = [243, 244, 246] // Tailwind gray-100
+      const primaryGreen = [74, 222, 128]
+      const secondaryBlue = [59, 130, 246]
+      const accentPurple = [168, 85, 247]
+      const textColor = [55, 65, 81]
+      const headerBg = [243, 244, 246]
 
       doc.setTextColor(textColor[0], textColor[1], textColor[2])
 
@@ -366,7 +389,7 @@ export default function SalonCashControl() {
 
       doc.setFontSize(12)
       doc.setFont("helvetica", "normal")
-      doc.text(`Fecha del Reporte: ${dailySummary.fecha}`, 20, 35)
+      doc.text(`Fecha del Reporte: ${displayDate}`, 20, 35) // Usa displayDate
       doc.text(`Generado el: ${format(new Date(), "dd/MM/yyyy hh:mm a")}`, 20, 42)
 
       // --- Resumen Financiero del Día ---
@@ -376,14 +399,13 @@ export default function SalonCashControl() {
       doc.text("RESUMEN FINANCIERO DEL DÍA", 20, yOffset)
       yOffset += 10
 
-      // Summary Cards (simulated with rectangles and text)
       const cardWidth = 45
       const cardHeight = 25
       const cardSpacing = 5
       let currentX = 20
 
       // Monto Inicial
-      doc.setFillColor(230, 230, 250) // Light purple
+      doc.setFillColor(230, 230, 250)
       doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
       doc.setTextColor(accentPurple[0], accentPurple[1], accentPurple[2])
       doc.setFontSize(8)
@@ -393,7 +415,7 @@ export default function SalonCashControl() {
       currentX += cardWidth + cardSpacing
 
       // Total Efectivo
-      doc.setFillColor(200, 250, 200) // Light green
+      doc.setFillColor(200, 250, 200)
       doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
       doc.setTextColor(primaryGreen[0], primaryGreen[1], primaryGreen[2])
       doc.setFontSize(8)
@@ -403,7 +425,7 @@ export default function SalonCashControl() {
       currentX += cardWidth + cardSpacing
 
       // Total Transferencias
-      doc.setFillColor(200, 220, 255) // Light blue
+      doc.setFillColor(200, 220, 255)
       doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
       doc.setTextColor(secondaryBlue[0], secondaryBlue[1], secondaryBlue[2])
       doc.setFontSize(8)
@@ -413,9 +435,9 @@ export default function SalonCashControl() {
       currentX += cardWidth + cardSpacing
 
       // Total Devuelto
-      doc.setFillColor(255, 200, 200) // Light red
+      doc.setFillColor(255, 200, 200)
       doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
-      doc.setTextColor(255, 0, 0) // Red
+      doc.setTextColor(255, 0, 0)
       doc.setFontSize(8)
       doc.text("Total Devuelto", currentX + 2, yOffset + 7)
       doc.setFontSize(12)
@@ -423,20 +445,20 @@ export default function SalonCashControl() {
       currentX += cardWidth + cardSpacing
 
       // Total Gastos Imprevistos
-      doc.setFillColor(255, 230, 200) // Light orange
+      doc.setFillColor(255, 230, 200)
       doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
-      doc.setTextColor(255, 140, 0) // Dark orange
+      doc.setTextColor(255, 140, 0)
       doc.setFontSize(8)
       doc.text("Gastos Imprevistos", currentX + 2, yOffset + 7)
       doc.setFontSize(12)
       doc.text(formatCurrency(dailySummary.totalGastosImprevistos), currentX + 2, yOffset + 17)
-      currentX = 20 // Reset X for next row if needed
-      yOffset += cardHeight + cardSpacing + 5 // Move down for next section
+      currentX = 20
+      yOffset += cardHeight + cardSpacing + 5
 
       // Total en Caja (Efectivo) - Highlighted
-      doc.setFillColor(primaryGreen[0], primaryGreen[1], primaryGreen[2]) // Green background
-      doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
-      doc.setTextColor(255, 255, 255) // White text
+      doc.setFillColor(primaryGreen[0], primaryGreen[1], primaryGreen[2])
+      doc.rect(currentX, yOffset, 170, 30, "F")
+      doc.setTextColor(255, 255, 255)
       doc.setFontSize(12)
       doc.text("TOTAL EN CAJA (EFECTIVO)", currentX + 5, yOffset + 10)
       doc.setFontSize(20)
@@ -444,16 +466,16 @@ export default function SalonCashControl() {
       yOffset += 30 + cardSpacing
 
       // TOTAL GENERAL - Highlighted
-      doc.setFillColor(accentPurple[0], accentPurple[1], accentPurple[2]) // Purple background
-      doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
-      doc.setTextColor(255, 255, 255) // White text
+      doc.setFillColor(accentPurple[0], accentPurple[1], accentPurple[2])
+      doc.rect(currentX, yOffset, 170, 30, "F")
+      doc.setTextColor(255, 255, 255)
       doc.setFontSize(12)
       doc.text("TOTAL GENERAL DEL DÍA", currentX + 5, yOffset + 10)
       doc.setFontSize(20)
       doc.text(formatCurrency(dailySummary.totalGeneral), currentX + 5, yOffset + 23)
-      yOffset += 30 + 15 // Move down for next section
+      yOffset += 30 + 15
 
-      doc.setTextColor(textColor[0], textColor[1], textColor[2]) // Reset text color
+      doc.setTextColor(textColor[0], textColor[1], textColor[2])
 
       // --- Detalle de Transacciones ---
       doc.setFontSize(18)
@@ -463,10 +485,7 @@ export default function SalonCashControl() {
 
       const transactionsData = transactions.map((t) => [
         t.cliente,
-        t.fecha
-          .split(" ")
-          .slice(-2)
-          .join(" "), // Hora
+        t.fecha.split(" ").slice(-2).join(" "),
         t.metodoPago === "efectivo" ? "Efectivo" : t.metodoPago === "tarjeta" ? "Tarjeta" : "Transferencia",
         formatCurrency(t.montoRecibido),
         formatCurrency(t.montoServicio),
@@ -476,14 +495,13 @@ export default function SalonCashControl() {
         t.observaciones,
       ])
 
-      // Llamar a autoTable directamente, pasándole la instancia de doc
       autoTable(doc, {
         startY: yOffset,
         head: [["Cliente", "Hora", "Método", "Recibido", "Servicio", "Recargo", "Cambio", "Atendió", "Observaciones"]],
         body: transactionsData,
-        theme: "striped", // Modern look with alternating row colors
+        theme: "striped",
         headStyles: {
-          fillColor: headerBg, // Light gray header
+          fillColor: headerBg,
           textColor: textColor,
           fontStyle: "bold",
           fontSize: 8,
@@ -491,22 +509,21 @@ export default function SalonCashControl() {
         styles: {
           fontSize: 7,
           cellPadding: 2,
-          overflow: "linebreak", // Handle long text
+          overflow: "linebreak",
           halign: "left",
         },
         columnStyles: {
-          0: { cellWidth: 25 }, // Cliente
-          1: { cellWidth: 15 }, // Hora
-          2: { cellWidth: 15 }, // Método
-          3: { cellWidth: 18 }, // Recibido
-          4: { cellWidth: 18 }, // Servicio
-          5: { cellWidth: 15 }, // Recargo
-          6: { cellWidth: 15 }, // Cambio
-          7: { cellWidth: 20 }, // Atendió
-          8: { cellWidth: 30 }, // Observaciones
+          0: { cellWidth: 25 },
+          1: { cellWidth: 15 },
+          2: { cellWidth: 15 },
+          3: { cellWidth: 18 },
+          4: { cellWidth: 18 },
+          5: { cellWidth: 15 },
+          6: { cellWidth: 15 },
+          7: { cellWidth: 20 },
+          8: { cellWidth: 30 },
         },
         didDrawPage: (data: any) => {
-          // Footer for page numbers
           doc.setFontSize(8)
           doc.text(
             "Página " + doc.internal.getNumberOfPages(),
@@ -517,14 +534,14 @@ export default function SalonCashControl() {
         },
       })
 
-      // Actualizar yOffset de forma segura
       yOffset = (autoTable as any).previous?.finalY ? (autoTable as any).previous.finalY + 15 : yOffset + 50
-      console.log("yOffset después de la tabla de transacciones:", yOffset)
 
       // --- Detalle de Gastos Imprevistos ---
       if (expenses.length > 0) {
-        doc.addPage() // Nueva página para gastos si hay muchos datos
-        yOffset = 20 // Reiniciar yOffset para la nueva página
+        if (yOffset > doc.internal.pageSize.height - 50) {
+          doc.addPage()
+          yOffset = 20
+        }
 
         doc.setFontSize(18)
         doc.setFont("helvetica", "bold")
@@ -532,10 +549,7 @@ export default function SalonCashControl() {
         yOffset += 10
 
         const expensesData = expenses.map((e) => [
-          e.fecha
-            .split(" ")
-            .slice(-2)
-            .join(" "), // Hora
+          e.fecha.split(" ").slice(-2).join(" "),
           formatCurrency(e.monto),
           e.descripcion,
         ])
@@ -558,9 +572,9 @@ export default function SalonCashControl() {
             halign: "left",
           },
           columnStyles: {
-            0: { cellWidth: 20 }, // Hora
-            1: { cellWidth: 25 }, // Monto
-            2: { cellWidth: 140 }, // Descripción
+            0: { cellWidth: 20 },
+            1: { cellWidth: 25 },
+            2: { cellWidth: 140 },
           },
           didDrawPage: (data: any) => {
             doc.setFontSize(8)
@@ -573,15 +587,12 @@ export default function SalonCashControl() {
           },
         })
         yOffset = (autoTable as any).previous?.finalY ? (autoTable as any).previous.finalY + 15 : yOffset + 50
-        console.log("yOffset después de la tabla de gastos:", yOffset)
       }
 
       // --- Estadísticas de Empleadas ---
-      // Asegurarse de que las estadísticas de empleadas comiencen en una nueva página si el contenido anterior es largo
       if (yOffset > doc.internal.pageSize.height - 50) {
-        // Si queda poco espacio
         doc.addPage()
-        yOffset = 20 // Reiniciar yOffset para la nueva página
+        yOffset = 20
       }
 
       doc.setFontSize(18)
@@ -602,7 +613,6 @@ export default function SalonCashControl() {
         clientesPorEmpleada[empleada.nombre] || 0,
       ])
 
-      // Llamar a autoTable directamente, pasándole la instancia de doc
       autoTable(doc, {
         startY: yOffset,
         head: [["Empleada", "Clientes Atendidos"]],
@@ -625,7 +635,7 @@ export default function SalonCashControl() {
         didDrawPage: (data: any) => {
           doc.setFontSize(8)
           doc.text(
-            "Página " + doc.internal.getNumberOfPages(), // Corrected line
+            "Página " + doc.internal.getNumberOfPages(),
             doc.internal.pageSize.width - 20,
             doc.internal.pageSize.height - 10,
             { align: "right" },
@@ -633,7 +643,7 @@ export default function SalonCashControl() {
         },
       })
 
-      doc.save(`reporte-salon-${dailySummary.fecha.replace(/\//g, "-")}.pdf`)
+      doc.save(`reporte-salon-${displayDate.replace(/\//g, "-")}.pdf`) // Usa displayDate en el nombre del archivo
       console.log("PDF generado y guardado.")
     } catch (error) {
       console.error("Error durante la exportación a PDF:", error)
@@ -650,13 +660,12 @@ export default function SalonCashControl() {
       const XLSX = await import("xlsx")
       console.log("XLSX importado:", XLSX)
 
-      // Crear libro de trabajo
       const workbook = XLSX.utils.book_new()
 
       // Hoja de resumen
       const resumenData = [
         ["CONTROL DE CAJA - SALÓN"],
-        [`Fecha: ${dailySummary.fecha}`],
+        [`Fecha: ${displayDate}`], // Usa displayDate
         [""],
         ["RESUMEN DEL DÍA"],
         ["Monto Inicial", formatCurrency(dailySummary.montoInicial)],
@@ -664,7 +673,7 @@ export default function SalonCashControl() {
         ["Total en Caja (Efectivo)", formatCurrency(dailySummary.saldoFinal)],
         ["Total Transferencias", formatCurrency(dailySummary.totalTransferencias)],
         ["Total Devuelto", formatCurrency(dailySummary.totalDevuelto)],
-        ["Total Gastos Imprevistos", formatCurrency(dailySummary.totalGastosImprevistos)], // Nuevo campo
+        ["Total Gastos Imprevistos", formatCurrency(dailySummary.totalGastosImprevistos)],
         ["TOTAL GENERAL", formatCurrency(dailySummary.totalGeneral)],
         ["Total de Transacciones", transactions.length],
         ["Empleadas Registradas", empleadas.length],
@@ -695,10 +704,10 @@ export default function SalonCashControl() {
             transaction.cliente,
             transaction.fecha,
             transaction.metodoPago,
-            formatCurrency(transaction.montoRecibido), // Aplicar formato de moneda
-            formatCurrency(transaction.montoServicio), // Aplicar formato de moneda
-            transaction.metodoPago === "tarjeta" ? formatCurrency(transaction.montoServicio * 0.05) : "-", // Aplicar formato de moneda
-            formatCurrency(transaction.cambioEntregado), // Aplicar formato de moneda
+            formatCurrency(transaction.montoRecibido),
+            formatCurrency(transaction.montoServicio),
+            transaction.metodoPago === "tarjeta" ? formatCurrency(transaction.montoServicio * 0.05) : "-",
+            formatCurrency(transaction.cambioEntregado),
             transaction.quienAtendio,
             transaction.observaciones,
           ])
@@ -750,7 +759,7 @@ export default function SalonCashControl() {
       }
 
       // Guardar archivo
-      XLSX.writeFile(workbook, `control-caja-${dailySummary.fecha.replace(/\//g, "-")}.xlsx`)
+      XLSX.writeFile(workbook, `control-caja-${displayDate.replace(/\//g, "-")}.xlsx`) // Usa displayDate en el nombre del archivo
       console.log("Archivo Excel generado y guardado.")
     } catch (error) {
       console.error("Error durante la exportación a Excel:", error)
@@ -779,7 +788,7 @@ export default function SalonCashControl() {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "nueva-transaccion", label: "Nueva Transacción", icon: Plus },
     { id: "transacciones", label: "Transacciones", icon: Receipt },
-    { id: "gastos-imprevistos", label: "Gastos Imprevistos", icon: MinusCircle }, // Nuevo item de menú
+    { id: "gastos-imprevistos", label: "Gastos Imprevistos", icon: MinusCircle },
     { id: "estadisticas", label: "Estadísticas", icon: BarChart3 },
     { id: "empleadas", label: "Empleadas", icon: UserPlus },
     { id: "configuracion", label: "Configuración", icon: Settings },
@@ -1252,7 +1261,7 @@ export default function SalonCashControl() {
           </Card>
         )
 
-      case "gastos-imprevistos": // Nueva sección para gastos
+      case "gastos-imprevistos":
         return (
           <div className="space-y-6">
             <Card>
@@ -1537,7 +1546,7 @@ export default function SalonCashControl() {
         <div className="absolute bottom-0 left-0 right-0 p-6 border-t">
           <div className="text-center text-sm text-gray-500">
             <CalendarDays className="h-4 w-4 inline mr-1" />
-            {dailySummary.fecha}
+            {displayDate} {/* Muestra la fecha seleccionada */}
           </div>
         </div>
       </div>
@@ -1565,8 +1574,38 @@ export default function SalonCashControl() {
         <div className="p-6">
           <div className="max-w-7xl mx-auto">
             {/* Header de escritorio */}
-            <div className="hidden lg:block mb-6">
+            <div className="hidden lg:flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">{getSectionTitle()}</h2>
+              <div className="flex items-center gap-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-[240px] justify-start text-left font-normal",
+                        !selectedDate && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      initialFocus
+                      locale={es} // Establecer el idioma español
+                    />
+                  </PopoverContent>
+                </Popover>
+                {!isToday(selectedDate || new Date()) && ( // Mostrar botón solo si no es hoy
+                  <Button onClick={goToCurrentDay} variant="outline">
+                    Ir a Hoy
+                  </Button>
+                )}
+              </div>
             </div>
 
             {renderContent()}

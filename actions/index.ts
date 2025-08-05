@@ -15,7 +15,7 @@ interface Transaction {
   cambioEntregado: number
   quienAtendio: string
   observaciones: string
-  fecha: string
+  fecha: string // Formato "dd/MM/yyyy hh:mm a"
 }
 
 interface Expense {
@@ -23,17 +23,17 @@ interface Expense {
   id: string
   monto: number
   descripcion: string
-  fecha: string
+  fecha: string // Formato "dd/MM/yyyy hh:mm a"
 }
 
 interface DailySummary {
   _id?: ObjectId
-  fecha: string
+  fecha: string // Formato "dd/MM/yyyy"
   montoInicial: number
   totalEfectivo: number
   totalTransferencias: number
   totalDevuelto: number
-  totalGastosImprevistos: number // Nuevo campo
+  totalGastosImprevistos: number
   saldoFinal: number
   totalGeneral: number
 }
@@ -53,31 +53,32 @@ const calculateSummaryValues = (
 ) => {
   const totalEfectivo = currentTransactions
     .filter((t) => t.metodoPago === "efectivo")
-    .reduce((sum, t) => sum + t.montoRecibido, 0)
+    .reduce((sum, t) => sum + (t.montoRecibido ?? 0), 0) // Asegurar que montoRecibido sea un número
 
   const totalTransferencias = currentTransactions
     .filter((t) => t.metodoPago === "tarjeta" || t.metodoPago === "transferencia")
-    .reduce((sum, t) => sum + t.montoRecibido, 0)
+    .reduce((sum, t) => sum + (t.montoRecibido ?? 0), 0) // CORREGIDO: t.montoRecibido y asegurar que sea un número
 
-  const totalDevuelto = currentTransactions.reduce((sum, t) => sum + t.cambioEntregado, 0)
+  const totalDevuelto = currentTransactions.reduce((sum, t) => sum + (t.cambioEntregado ?? 0), 0) // Asegurar que cambioEntregado sea un número
 
-  const totalGastosImprevistos = currentExpenses.reduce((sum, e) => sum + e.monto, 0) // Suma de gastos
+  const totalGastosImprevistos = currentExpenses.reduce((sum, e) => sum + (e.monto ?? 0), 0) // Asegurar que monto sea un número
 
-  const saldoFinal = currentMontoInicial + totalEfectivo - totalDevuelto - totalGastosImprevistos // Restar gastos
+  const saldoFinal = currentMontoInicial + totalEfectivo - totalDevuelto - totalGastosImprevistos
   const totalGeneral = saldoFinal + totalTransferencias
 
   return {
     totalEfectivo,
     totalTransferencias,
     totalDevuelto,
-    totalGastosImprevistos, // Incluir en el retorno
+    totalGastosImprevistos,
     saldoFinal,
     totalGeneral,
   }
 }
 
 // --- GET INITIAL DATA ---
-export async function getInitialData() {
+// Ahora acepta una fecha opcional para cargar datos de un día específico
+export async function getInitialData(dateToLoad?: string) {
   try {
     const { db } = await connectToDatabase()
     const transactionsCollection = db.collection<Transaction>("transactions")
@@ -85,18 +86,21 @@ export async function getInitialData() {
     const empleadasCollection = db.collection<Empleada>("empleadas")
     const expensesCollection = db.collection<Expense>("expenses")
 
-    const transactions = await transactionsCollection.find({}).toArray()
-    const empleadas = await empleadasCollection.find({}).toArray()
-    const expenses = await expensesCollection.find({}).toArray()
+    const todayFormatted = format(new Date(), "dd/MM/yyyy")
+    const targetDate = dateToLoad || todayFormatted // Usa la fecha proporcionada o la actual
 
-    // Find or create daily summary for today
-    const today = format(new Date(), "dd/MM/yyyy")
-    let dailySummary = await dailySummaryCollection.findOne({ fecha: today })
+    // Filtra transacciones y gastos por la fecha objetivo
+    const transactions = await transactionsCollection.find({ fecha: { $regex: `^${targetDate}` } }).toArray()
+    const expenses = await expensesCollection.find({ fecha: { $regex: `^${targetDate}` } }).toArray()
+    const empleadas = await empleadasCollection.find({}).toArray() // Empleadas no dependen de la fecha
+
+    // Encuentra o crea el resumen diario para la fecha objetivo
+    let dailySummary = await dailySummaryCollection.findOne({ fecha: targetDate })
 
     if (!dailySummary) {
-      // If no summary for today, create a default one
+      // Si no hay resumen para la fecha objetivo, crea uno por defecto
       const defaultSummary: DailySummary = {
-        fecha: today,
+        fecha: targetDate,
         montoInicial: 4090, // Default initial amount
         totalEfectivo: 0,
         totalTransferencias: 0,
@@ -107,84 +111,87 @@ export async function getInitialData() {
       }
       await dailySummaryCollection.insertOne(defaultSummary)
       dailySummary = defaultSummary
+    } else {
+      // Asegurar que todas las propiedades numéricas sean números, no null/undefined
+      dailySummary.montoInicial = dailySummary.montoInicial ?? 0
+      dailySummary.totalEfectivo = dailySummary.totalEfectivo ?? 0
+      dailySummary.totalTransferencias = dailySummary.totalTransferencias ?? 0
+      dailySummary.totalDevuelto = dailySummary.totalDevuelto ?? 0
+      dailySummary.totalGastosImprevistos = dailySummary.totalGastosImprevistos ?? 0
+      dailySummary.saldoFinal = dailySummary.saldoFinal ?? 0
+      dailySummary.totalGeneral = dailySummary.totalGeneral ?? 0
     }
 
-    // Recalculate summary based on fetched data to ensure consistency
+    // Recalcula el resumen basado en los datos filtrados para la fecha objetivo
     const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
-      calculateSummaryValues(
-        dailySummary.montoInicial,
-        transactions,
-        expenses, // Pasar los gastos
-      )
+      calculateSummaryValues(dailySummary.montoInicial, transactions, expenses)
 
     dailySummary = {
       ...dailySummary,
       totalEfectivo,
       totalTransferencias,
       totalDevuelto,
-      totalGastosImprevistos, // Incluir en la actualización
+      totalGastosImprevistos,
       saldoFinal,
       totalGeneral,
     }
 
-    // Update the summary in DB with recalculated values
-    await dailySummaryCollection.updateOne({ fecha: today }, { $set: dailySummary }, { upsert: true })
+    // Actualiza el resumen en la DB con los valores recalculados (upsert para asegurar que exista)
+    await dailySummaryCollection.updateOne({ fecha: targetDate }, { $set: dailySummary }, { upsert: true })
 
     return {
-      transactions: JSON.parse(JSON.stringify(transactions)), // Serialize ObjectId
-      dailySummary: JSON.parse(JSON.stringify(dailySummary)), // Serialize ObjectId
-      empleadas: JSON.parse(JSON.stringify(empleadas)), // Serialize ObjectId
-      expenses: JSON.parse(JSON.stringify(expenses)), // Nuevo retorno
+      transactions: JSON.parse(JSON.stringify(transactions)),
+      dailySummary: JSON.parse(JSON.stringify(dailySummary)),
+      empleadas: JSON.parse(JSON.stringify(empleadas)),
+      expenses: JSON.parse(JSON.stringify(expenses)),
     }
   } catch (error) {
     console.error("Error fetching initial data:", error)
     return {
       transactions: [],
       dailySummary: {
-        fecha: format(new Date(), "dd/MM/yyyy"),
+        fecha: dateToLoad || format(new Date(), "dd/MM/yyyy"),
         montoInicial: 4090,
         totalEfectivo: 0,
         totalTransferencias: 0,
         totalDevuelto: 0,
-        totalGastosImprevistos: 0, // Nuevo campo en el fallback
+        totalGastosImprevistos: 0,
         saldoFinal: 0,
         totalGeneral: 0,
       },
       empleadas: [],
-      expenses: [], // Nuevo campo en el fallback
+      expenses: [],
       error: "Failed to fetch initial data",
     }
   }
 }
 
 // --- TRANSACTIONS ---
+// Estas acciones siempre operan sobre el día actual
 export async function addTransactionAction(newTransactionData: Omit<Transaction, "_id" | "fecha">) {
   try {
     const { db } = await connectToDatabase()
     const transactionsCollection = db.collection<Transaction>("transactions")
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
+    const expensesCollection = db.collection<Expense>("expenses")
 
+    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
     const transaction: Transaction = {
       ...newTransactionData,
-      id: Date.now().toString(), // Ensure a string ID for client-side use
-      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"),
+      id: Date.now().toString(),
+      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"), // Fecha y hora actual
     }
 
     await transactionsCollection.insertOne(transaction)
 
-    // Recalculate and update daily summary
-    const today = format(new Date(), "dd/MM/yyyy")
+    // Recalcular y actualizar el resumen diario para HOY
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
-    const allTransactions = await transactionsCollection.find({}).toArray()
-    const allExpenses = await db.collection<Expense>("expenses").find({}).toArray()
+    const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
+    const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
 
     if (currentSummary) {
       const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
-        calculateSummaryValues(
-          currentSummary.montoInicial,
-          allTransactions,
-          allExpenses, // Pasar los gastos
-        )
+        calculateSummaryValues(currentSummary.montoInicial, allTransactionsToday, allExpensesToday)
 
       await dailySummaryCollection.updateOne(
         { fecha: today },
@@ -193,7 +200,7 @@ export async function addTransactionAction(newTransactionData: Omit<Transaction,
             totalEfectivo,
             totalTransferencias,
             totalDevuelto,
-            totalGastosImprevistos, // Incluir en la actualización
+            totalGastosImprevistos,
             saldoFinal,
             totalGeneral,
           },
@@ -213,22 +220,19 @@ export async function deleteTransactionAction(id: string) {
     const { db } = await connectToDatabase()
     const transactionsCollection = db.collection<Transaction>("transactions")
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
+    const expensesCollection = db.collection<Expense>("expenses")
 
     await transactionsCollection.deleteOne({ id: id })
 
-    // Recalculate and update daily summary
-    const today = format(new Date(), "dd/MM/yyyy")
+    // Recalcular y actualizar el resumen diario para HOY
+    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
-    const allTransactions = await transactionsCollection.find({}).toArray()
-    const allExpenses = await db.collection<Expense>("expenses").find({}).toArray()
+    const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
+    const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
 
     if (currentSummary) {
       const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
-        calculateSummaryValues(
-          currentSummary.montoInicial,
-          allTransactions,
-          allExpenses, // Pasar los gastos
-        )
+        calculateSummaryValues(currentSummary.montoInicial, allTransactionsToday, allExpensesToday)
 
       await dailySummaryCollection.updateOne(
         { fecha: today },
@@ -237,7 +241,7 @@ export async function deleteTransactionAction(id: string) {
             totalEfectivo,
             totalTransferencias,
             totalDevuelto,
-            totalGastosImprevistos, // Incluir en la actualización
+            totalGastosImprevistos,
             saldoFinal,
             totalGeneral,
           },
@@ -286,6 +290,7 @@ export async function deleteEmpleadaAction(id: string) {
 }
 
 // --- GASTOS IMPREVISTOS ---
+// Estas acciones siempre operan sobre el día actual
 export async function addExpenseAction(newExpenseData: Omit<Expense, "_id" | "fecha">) {
   try {
     const { db } = await connectToDatabase()
@@ -293,23 +298,23 @@ export async function addExpenseAction(newExpenseData: Omit<Expense, "_id" | "fe
     const transactionsCollection = db.collection<Transaction>("transactions")
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
 
+    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
     const expense: Expense = {
       ...newExpenseData,
       id: Date.now().toString(),
-      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"),
+      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"), // Fecha y hora actual
     }
 
     await expensesCollection.insertOne(expense)
 
-    // Recalculate and update daily summary
-    const today = format(new Date(), "dd/MM/yyyy")
+    // Recalcular y actualizar el resumen diario para HOY
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
-    const allTransactions = await transactionsCollection.find({}).toArray()
-    const allExpenses = await expensesCollection.find({}).toArray()
+    const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
+    const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
 
     if (currentSummary) {
       const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
-        calculateSummaryValues(currentSummary.montoInicial, allTransactions, allExpenses)
+        calculateSummaryValues(currentSummary.montoInicial, allTransactionsToday, allExpensesToday)
 
       await dailySummaryCollection.updateOne(
         { fecha: today },
@@ -342,15 +347,15 @@ export async function deleteExpenseAction(id: string) {
 
     await expensesCollection.deleteOne({ id: id })
 
-    // Recalculate and update daily summary
-    const today = format(new Date(), "dd/MM/yyyy")
+    // Recalcular y actualizar el resumen diario para HOY
+    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
-    const allTransactions = await transactionsCollection.find({}).toArray()
-    const allExpenses = await expensesCollection.find({}).toArray()
+    const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
+    const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
 
     if (currentSummary) {
       const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
-        calculateSummaryValues(currentSummary.montoInicial, allTransactions, allExpenses)
+        calculateSummaryValues(currentSummary.montoInicial, allTransactionsToday, allExpensesToday)
 
       await dailySummaryCollection.updateOne(
         { fecha: today },
@@ -375,18 +380,19 @@ export async function deleteExpenseAction(id: string) {
 }
 
 // --- DAILY SUMMARY / CONFIGURATION ---
+// Esta acción siempre opera sobre el día actual
 export async function updateInitialAmountAction(newAmount: number) {
   try {
     const { db } = await connectToDatabase()
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
     const transactionsCollection = db.collection<Transaction>("transactions")
-    const allExpenses = await db.collection<Expense>("expenses").find({}).toArray()
+    const expensesCollection = db.collection<Expense>("expenses")
 
-    const today = format(new Date(), "dd/MM/yyyy")
+    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
     let dailySummary = await dailySummaryCollection.findOne({ fecha: today })
 
     if (!dailySummary) {
-      // Should not happen if getInitialData is called first, but as a fallback
+      // Si no existe el resumen para hoy, crea uno
       const defaultSummary: DailySummary = {
         fecha: today,
         montoInicial: newAmount,
@@ -400,25 +406,32 @@ export async function updateInitialAmountAction(newAmount: number) {
       await dailySummaryCollection.insertOne(defaultSummary)
       dailySummary = defaultSummary
     } else {
+      // Asegurar que todas las propiedades numéricas sean números, no null/undefined
+      dailySummary.montoInicial = dailySummary.montoInicial ?? 0
+      dailySummary.totalEfectivo = dailySummary.totalEfectivo ?? 0
+      dailySummary.totalTransferencias = dailySummary.totalTransferencias ?? 0
+      dailySummary.totalDevuelto = dailySummary.totalDevuelto ?? 0
+      dailySummary.totalGastosImprevistos = dailySummary.totalGastosImprevistos ?? 0
+      dailySummary.saldoFinal = dailySummary.saldoFinal ?? 0
+      dailySummary.totalGeneral = dailySummary.totalGeneral ?? 0
+
       await dailySummaryCollection.updateOne({ fecha: today }, { $set: { montoInicial: newAmount } })
-      dailySummary.montoInicial = newAmount // Update local object for recalculation
+      dailySummary.montoInicial = newAmount // Actualiza el objeto local para el recálculo
     }
 
-    // Recalculate and update daily summary based on new initial amount and existing transactions
-    const allTransactions = await transactionsCollection.find({}).toArray()
+    // Recalcular y actualizar el resumen diario basado en el nuevo monto inicial y las transacciones/gastos de HOY
+    const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
+    const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
+
     const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
-      calculateSummaryValues(
-        dailySummary.montoInicial,
-        allTransactions,
-        allExpenses, // Pasar los gastos
-      )
+      calculateSummaryValues(dailySummary.montoInicial, allTransactionsToday, allExpensesToday)
 
     const updatedSummary = {
       ...dailySummary,
       totalEfectivo,
       totalTransferencias,
       totalDevuelto,
-      totalGastosImprevistos, // Incluir en la actualización
+      totalGastosImprevistos,
       saldoFinal,
       totalGeneral,
     }
