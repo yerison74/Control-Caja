@@ -18,13 +18,22 @@ interface Transaction {
   fecha: string
 }
 
+interface Expense {
+  _id?: ObjectId
+  id: string
+  monto: number
+  descripcion: string
+  fecha: string
+}
+
 interface DailySummary {
-  _id?: ObjectId // MongoDB uses _id
+  _id?: ObjectId
   fecha: string
   montoInicial: number
   totalEfectivo: number
   totalTransferencias: number
   totalDevuelto: number
+  totalGastosImprevistos: number // Nuevo campo
   saldoFinal: number
   totalGeneral: number
 }
@@ -37,7 +46,11 @@ interface Empleada {
 }
 
 // Helper function to calculate summary values (duplicated for server-side consistency)
-const calculateSummaryValues = (currentMontoInicial: number, currentTransactions: Transaction[]) => {
+const calculateSummaryValues = (
+  currentMontoInicial: number,
+  currentTransactions: Transaction[],
+  currentExpenses: Expense[],
+) => {
   const totalEfectivo = currentTransactions
     .filter((t) => t.metodoPago === "efectivo")
     .reduce((sum, t) => sum + t.montoRecibido, 0)
@@ -48,13 +61,16 @@ const calculateSummaryValues = (currentMontoInicial: number, currentTransactions
 
   const totalDevuelto = currentTransactions.reduce((sum, t) => sum + t.cambioEntregado, 0)
 
-  const saldoFinal = currentMontoInicial + totalEfectivo - totalDevuelto
+  const totalGastosImprevistos = currentExpenses.reduce((sum, e) => sum + e.monto, 0) // Suma de gastos
+
+  const saldoFinal = currentMontoInicial + totalEfectivo - totalDevuelto - totalGastosImprevistos // Restar gastos
   const totalGeneral = saldoFinal + totalTransferencias
 
   return {
     totalEfectivo,
     totalTransferencias,
     totalDevuelto,
+    totalGastosImprevistos, // Incluir en el retorno
     saldoFinal,
     totalGeneral,
   }
@@ -67,9 +83,11 @@ export async function getInitialData() {
     const transactionsCollection = db.collection<Transaction>("transactions")
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
     const empleadasCollection = db.collection<Empleada>("empleadas")
+    const expensesCollection = db.collection<Expense>("expenses")
 
     const transactions = await transactionsCollection.find({}).toArray()
     const empleadas = await empleadasCollection.find({}).toArray()
+    const expenses = await expensesCollection.find({}).toArray()
 
     // Find or create daily summary for today
     const today = format(new Date(), "dd/MM/yyyy")
@@ -83,6 +101,7 @@ export async function getInitialData() {
         totalEfectivo: 0,
         totalTransferencias: 0,
         totalDevuelto: 0,
+        totalGastosImprevistos: 0,
         saldoFinal: 0,
         totalGeneral: 0,
       }
@@ -91,16 +110,19 @@ export async function getInitialData() {
     }
 
     // Recalculate summary based on fetched data to ensure consistency
-    const { totalEfectivo, totalTransferencias, totalDevuelto, saldoFinal, totalGeneral } = calculateSummaryValues(
-      dailySummary.montoInicial,
-      transactions,
-    )
+    const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
+      calculateSummaryValues(
+        dailySummary.montoInicial,
+        transactions,
+        expenses, // Pasar los gastos
+      )
 
     dailySummary = {
       ...dailySummary,
       totalEfectivo,
       totalTransferencias,
       totalDevuelto,
+      totalGastosImprevistos, // Incluir en la actualización
       saldoFinal,
       totalGeneral,
     }
@@ -112,6 +134,7 @@ export async function getInitialData() {
       transactions: JSON.parse(JSON.stringify(transactions)), // Serialize ObjectId
       dailySummary: JSON.parse(JSON.stringify(dailySummary)), // Serialize ObjectId
       empleadas: JSON.parse(JSON.stringify(empleadas)), // Serialize ObjectId
+      expenses: JSON.parse(JSON.stringify(expenses)), // Nuevo retorno
     }
   } catch (error) {
     console.error("Error fetching initial data:", error)
@@ -123,10 +146,12 @@ export async function getInitialData() {
         totalEfectivo: 0,
         totalTransferencias: 0,
         totalDevuelto: 0,
+        totalGastosImprevistos: 0, // Nuevo campo en el fallback
         saldoFinal: 0,
         totalGeneral: 0,
       },
       empleadas: [],
+      expenses: [], // Nuevo campo en el fallback
       error: "Failed to fetch initial data",
     }
   }
@@ -151,12 +176,15 @@ export async function addTransactionAction(newTransactionData: Omit<Transaction,
     const today = format(new Date(), "dd/MM/yyyy")
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
     const allTransactions = await transactionsCollection.find({}).toArray()
+    const allExpenses = await db.collection<Expense>("expenses").find({}).toArray()
 
     if (currentSummary) {
-      const { totalEfectivo, totalTransferencias, totalDevuelto, saldoFinal, totalGeneral } = calculateSummaryValues(
-        currentSummary.montoInicial,
-        allTransactions,
-      )
+      const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
+        calculateSummaryValues(
+          currentSummary.montoInicial,
+          allTransactions,
+          allExpenses, // Pasar los gastos
+        )
 
       await dailySummaryCollection.updateOne(
         { fecha: today },
@@ -165,6 +193,7 @@ export async function addTransactionAction(newTransactionData: Omit<Transaction,
             totalEfectivo,
             totalTransferencias,
             totalDevuelto,
+            totalGastosImprevistos, // Incluir en la actualización
             saldoFinal,
             totalGeneral,
           },
@@ -191,12 +220,15 @@ export async function deleteTransactionAction(id: string) {
     const today = format(new Date(), "dd/MM/yyyy")
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
     const allTransactions = await transactionsCollection.find({}).toArray()
+    const allExpenses = await db.collection<Expense>("expenses").find({}).toArray()
 
     if (currentSummary) {
-      const { totalEfectivo, totalTransferencias, totalDevuelto, saldoFinal, totalGeneral } = calculateSummaryValues(
-        currentSummary.montoInicial,
-        allTransactions,
-      )
+      const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
+        calculateSummaryValues(
+          currentSummary.montoInicial,
+          allTransactions,
+          allExpenses, // Pasar los gastos
+        )
 
       await dailySummaryCollection.updateOne(
         { fecha: today },
@@ -205,6 +237,7 @@ export async function deleteTransactionAction(id: string) {
             totalEfectivo,
             totalTransferencias,
             totalDevuelto,
+            totalGastosImprevistos, // Incluir en la actualización
             saldoFinal,
             totalGeneral,
           },
@@ -252,12 +285,102 @@ export async function deleteEmpleadaAction(id: string) {
   }
 }
 
+// --- GASTOS IMPREVISTOS ---
+export async function addExpenseAction(newExpenseData: Omit<Expense, "_id" | "fecha">) {
+  try {
+    const { db } = await connectToDatabase()
+    const expensesCollection = db.collection<Expense>("expenses")
+    const transactionsCollection = db.collection<Transaction>("transactions")
+    const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
+
+    const expense: Expense = {
+      ...newExpenseData,
+      id: Date.now().toString(),
+      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"),
+    }
+
+    await expensesCollection.insertOne(expense)
+
+    // Recalculate and update daily summary
+    const today = format(new Date(), "dd/MM/yyyy")
+    const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
+    const allTransactions = await transactionsCollection.find({}).toArray()
+    const allExpenses = await expensesCollection.find({}).toArray()
+
+    if (currentSummary) {
+      const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
+        calculateSummaryValues(currentSummary.montoInicial, allTransactions, allExpenses)
+
+      await dailySummaryCollection.updateOne(
+        { fecha: today },
+        {
+          $set: {
+            totalEfectivo,
+            totalTransferencias,
+            totalDevuelto,
+            totalGastosImprevistos,
+            saldoFinal,
+            totalGeneral,
+          },
+        },
+      )
+    }
+
+    return { success: true, expense: JSON.parse(JSON.stringify(expense)) }
+  } catch (error) {
+    console.error("Error adding expense:", error)
+    return { success: false, error: "Failed to add expense" }
+  }
+}
+
+export async function deleteExpenseAction(id: string) {
+  try {
+    const { db } = await connectToDatabase()
+    const expensesCollection = db.collection<Expense>("expenses")
+    const transactionsCollection = db.collection<Transaction>("transactions")
+    const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
+
+    await expensesCollection.deleteOne({ id: id })
+
+    // Recalculate and update daily summary
+    const today = format(new Date(), "dd/MM/yyyy")
+    const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
+    const allTransactions = await transactionsCollection.find({}).toArray()
+    const allExpenses = await expensesCollection.find({}).toArray()
+
+    if (currentSummary) {
+      const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
+        calculateSummaryValues(currentSummary.montoInicial, allTransactions, allExpenses)
+
+      await dailySummaryCollection.updateOne(
+        { fecha: today },
+        {
+          $set: {
+            totalEfectivo,
+            totalTransferencias,
+            totalDevuelto,
+            totalGastosImprevistos,
+            saldoFinal,
+            totalGeneral,
+          },
+        },
+      )
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error("Error deleting expense:", error)
+    return { success: false, error: "Failed to delete expense" }
+  }
+}
+
 // --- DAILY SUMMARY / CONFIGURATION ---
 export async function updateInitialAmountAction(newAmount: number) {
   try {
     const { db } = await connectToDatabase()
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
     const transactionsCollection = db.collection<Transaction>("transactions")
+    const allExpenses = await db.collection<Expense>("expenses").find({}).toArray()
 
     const today = format(new Date(), "dd/MM/yyyy")
     let dailySummary = await dailySummaryCollection.findOne({ fecha: today })
@@ -270,6 +393,7 @@ export async function updateInitialAmountAction(newAmount: number) {
         totalEfectivo: 0,
         totalTransferencias: 0,
         totalDevuelto: 0,
+        totalGastosImprevistos: 0,
         saldoFinal: 0,
         totalGeneral: 0,
       }
@@ -282,16 +406,19 @@ export async function updateInitialAmountAction(newAmount: number) {
 
     // Recalculate and update daily summary based on new initial amount and existing transactions
     const allTransactions = await transactionsCollection.find({}).toArray()
-    const { totalEfectivo, totalTransferencias, totalDevuelto, saldoFinal, totalGeneral } = calculateSummaryValues(
-      dailySummary.montoInicial,
-      allTransactions,
-    )
+    const { totalEfectivo, totalTransferencias, totalDevuelto, totalGastosImprevistos, saldoFinal, totalGeneral } =
+      calculateSummaryValues(
+        dailySummary.montoInicial,
+        allTransactions,
+        allExpenses, // Pasar los gastos
+      )
 
     const updatedSummary = {
       ...dailySummary,
       totalEfectivo,
       totalTransferencias,
       totalDevuelto,
+      totalGastosImprevistos, // Incluir en la actualización
       saldoFinal,
       totalGeneral,
     }

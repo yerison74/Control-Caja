@@ -20,6 +20,7 @@ import {
   Clock,
   Wallet,
   Trash2,
+  MinusCircle,
 } from "lucide-react"
 import { format } from "date-fns"
 import {
@@ -29,6 +30,8 @@ import {
   addEmpleadaAction,
   deleteEmpleadaAction,
   updateInitialAmountAction,
+  addExpenseAction, // Importar nueva acción
+  deleteExpenseAction, // Importar nueva acción
 } from "@/actions" // Import Server Actions
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -39,7 +42,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog" // Import Dialog components
-import "jspdf-autotable" // Import the plugin
 
 interface Transaction {
   id: string
@@ -53,12 +55,20 @@ interface Transaction {
   fecha: string
 }
 
+interface Expense {
+  id: string
+  monto: number
+  descripcion: string
+  fecha: string
+}
+
 interface DailySummary {
   fecha: string
   montoInicial: number
   totalEfectivo: number
   totalTransferencias: number
   totalDevuelto: number
+  totalGastosImprevistos: number // Nuevo campo
   saldoFinal: number
   totalGeneral: number
 }
@@ -76,9 +86,11 @@ type ActiveSection =
   | "estadisticas"
   | "empleadas"
   | "configuracion"
+  | "gastos-imprevistos" // Nueva sección
 
 export default function SalonCashControl() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [expenses, setExpenses] = useState<Expense[]>([]) // Nuevo estado para gastos
   const [empleadas, setEmpleadas] = useState<Empleada[]>([])
   const [dailySummary, setDailySummary] = useState<DailySummary>({
     fecha: format(new Date(), "dd/MM/yyyy"),
@@ -86,6 +98,7 @@ export default function SalonCashControl() {
     totalEfectivo: 0,
     totalTransferencias: 0,
     totalDevuelto: 0,
+    totalGastosImprevistos: 0, // Inicializar nuevo campo
     saldoFinal: 0,
     totalGeneral: 0,
   })
@@ -99,6 +112,12 @@ export default function SalonCashControl() {
     cambioEntregado: 0,
     quienAtendio: "",
     observaciones: "",
+  })
+
+  const [newExpense, setNewExpense] = useState<Omit<Expense, "id" | "fecha">>({
+    // Nuevo estado para nuevo gasto
+    monto: 0,
+    descripcion: "",
   })
 
   const [newEmpleada, setNewEmpleada] = useState("")
@@ -125,6 +144,10 @@ export default function SalonCashControl() {
       }
       if (data.empleadas) {
         setEmpleadas(data.empleadas)
+      }
+      if (data.expenses) {
+        // Cargar gastos
+        setExpenses(data.expenses)
       }
       setIsLoading(false)
     }
@@ -193,6 +216,10 @@ export default function SalonCashControl() {
       if (updatedData.dailySummary) {
         setDailySummary(updatedData.dailySummary)
       }
+      if (updatedData.expenses) {
+        // Actualizar gastos también
+        setExpenses(updatedData.expenses)
+      }
       setNewTransaction({
         cliente: "",
         metodoPago: "efectivo",
@@ -205,6 +232,52 @@ export default function SalonCashControl() {
       setActiveSection("transacciones")
     } else {
       alert(`Error al agregar transacción: ${result.error}`)
+    }
+  }
+
+  // Agregar nuevo gasto imprevisto
+  const addExpense = async () => {
+    if (newExpense.monto <= 0 || !newExpense.descripcion.trim()) {
+      alert("Por favor ingrese un monto válido y una descripción para el gasto.")
+      return
+    }
+
+    const result = await addExpenseAction(newExpense)
+    if (result.success && result.expense) {
+      setExpenses((prev) => [...prev, result.expense])
+      // Re-fetch summary to get updated totals
+      const updatedData = await getInitialData()
+      if (updatedData.dailySummary) {
+        setDailySummary(updatedData.dailySummary)
+      }
+      if (updatedData.transactions) {
+        // Actualizar transacciones también
+        setTransactions(updatedData.transactions)
+      }
+      setNewExpense({ monto: 0, descripcion: "" })
+    } else {
+      alert(`Error al agregar gasto: ${result.error}`)
+    }
+  }
+
+  // Eliminar gasto imprevisto
+  const deleteExpense = async (id: string) => {
+    if (confirm("¿Estás seguro de que quieres eliminar este gasto?")) {
+      const result = await deleteExpenseAction(id)
+      if (result.success) {
+        setExpenses((prev) => prev.filter((e) => e.id !== id))
+        // Re-fetch summary to get updated totals
+        const updatedData = await getInitialData()
+        if (updatedData.dailySummary) {
+          setDailySummary(updatedData.dailySummary)
+        }
+        if (updatedData.transactions) {
+          // Actualizar transacciones también
+          setTransactions(updatedData.transactions)
+        }
+      } else {
+        alert(`Error al eliminar gasto: ${result.error}`)
+      }
     }
   }
 
@@ -236,6 +309,10 @@ export default function SalonCashControl() {
         if (updatedData.dailySummary) {
           setDailySummary(updatedData.dailySummary)
         }
+        if (updatedData.expenses) {
+          // Actualizar gastos también
+          setExpenses(updatedData.expenses)
+        }
       } else {
         alert(`Error al eliminar transacción: ${result.error}`)
       }
@@ -252,281 +329,265 @@ export default function SalonCashControl() {
 
   // Exportar a PDF
   const exportToPDF = async () => {
-    const { jsPDF } = await import("jspdf")
+    try {
+      console.log("Iniciando exportación a PDF (alternativa con manejo de finalY)...")
 
-    const doc = new jsPDF()
+      // Importar jsPDF
+      const { jsPDF } = await import("jspdf")
+      console.log("jsPDF importado:", jsPDF)
 
-    // Define colors (RGB values)
-    const primaryGreen = [74, 222, 128] // Tailwind green-500
-    const secondaryBlue = [59, 130, 246] // Tailwind blue-500
-    const accentPurple = [168, 85, 247] // Tailwind purple-500
-    const textColor = [55, 65, 81] // Tailwind gray-700
-    const headerBg = [243, 244, 246] // Tailwind gray-100
-    const lightGray = [240, 240, 240] // For table rows
+      // Importar autoTable directamente como una función
+      const { default: autoTable } = await import("jspdf-autotable")
+      console.log("autoTable importado:", autoTable)
 
-    doc.setTextColor(textColor[0], textColor[1], textColor[2])
+      // Verificar si autoTable es una función
+      if (typeof autoTable !== "function") {
+        console.error("Error: autoTable NO es una función después de la importación.")
+        throw new Error("La función autoTable no se cargó correctamente.")
+      }
+      console.log("autoTable está disponible y es una función.")
 
-    // --- Header ---
-    doc.setFontSize(24)
-    doc.setFont("helvetica", "bold")
-    doc.text("Reporte Diario de Caja - Salón", 20, 25)
+      const doc = new jsPDF()
+      console.log("Instancia de jsPDF creada:", doc)
 
-    doc.setFontSize(12)
-    doc.setFont("helvetica", "normal")
-    doc.text(`Fecha del Reporte: ${dailySummary.fecha}`, 20, 35)
-    doc.text(`Generado el: ${format(new Date(), "dd/MM/yyyy hh:mm a")}`, 20, 42)
+      // Define colors (RGB values)
+      const primaryGreen = [74, 222, 128] // Tailwind green-500
+      const secondaryBlue = [59, 130, 246] // Tailwind blue-500
+      const accentPurple = [168, 85, 247] // Tailwind purple-500
+      const textColor = [55, 65, 81] // Tailwind gray-700
+      const headerBg = [243, 244, 246] // Tailwind gray-100
 
-    // --- Resumen Financiero del Día ---
-    let yOffset = 60
-    doc.setFontSize(18)
-    doc.setFont("helvetica", "bold")
-    doc.text("RESUMEN FINANCIERO DEL DÍA", 20, yOffset)
-    yOffset += 10
+      doc.setTextColor(textColor[0], textColor[1], textColor[2])
 
-    // Summary Cards (simulated with rectangles and text)
-    const cardWidth = 45
-    const cardHeight = 25
-    const cardSpacing = 5
-    let currentX = 20
+      // --- Header ---
+      doc.setFontSize(24)
+      doc.setFont("helvetica", "bold")
+      doc.text("Reporte Diario de Caja - Salón", 20, 25)
 
-    // Monto Inicial
-    doc.setFillColor(230, 230, 250) // Light purple
-    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
-    doc.setTextColor(accentPurple[0], accentPurple[1], accentPurple[2])
-    doc.setFontSize(8)
-    doc.text("Monto Inicial", currentX + 2, yOffset + 7)
-    doc.setFontSize(12)
-    doc.text(formatCurrency(dailySummary.montoInicial), currentX + 2, yOffset + 17)
-    currentX += cardWidth + cardSpacing
+      doc.setFontSize(12)
+      doc.setFont("helvetica", "normal")
+      doc.text(`Fecha del Reporte: ${dailySummary.fecha}`, 20, 35)
+      doc.text(`Generado el: ${format(new Date(), "dd/MM/yyyy hh:mm a")}`, 20, 42)
 
-    // Total Efectivo
-    doc.setFillColor(200, 250, 200) // Light green
-    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
-    doc.setTextColor(primaryGreen[0], primaryGreen[1], primaryGreen[2])
-    doc.setFontSize(8)
-    doc.text("Total Efectivo", currentX + 2, yOffset + 7)
-    doc.setFontSize(12)
-    doc.text(formatCurrency(dailySummary.totalEfectivo), currentX + 2, yOffset + 17)
-    currentX += cardWidth + cardSpacing
+      // --- Resumen Financiero del Día ---
+      let yOffset = 60
+      doc.setFontSize(18)
+      doc.setFont("helvetica", "bold")
+      doc.text("RESUMEN FINANCIERO DEL DÍA", 20, yOffset)
+      yOffset += 10
 
-    // Total Transferencias
-    doc.setFillColor(200, 220, 255) // Light blue
-    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
-    doc.setTextColor(secondaryBlue[0], secondaryBlue[1], secondaryBlue[2])
-    doc.setFontSize(8)
-    doc.text("Total Transferencias", currentX + 2, yOffset + 7)
-    doc.setFontSize(12)
-    doc.text(formatCurrency(dailySummary.totalTransferencias), currentX + 2, yOffset + 17)
-    currentX += cardWidth + cardSpacing
+      // Summary Cards (simulated with rectangles and text)
+      const cardWidth = 45
+      const cardHeight = 25
+      const cardSpacing = 5
+      let currentX = 20
 
-    // Total Devuelto
-    doc.setFillColor(255, 200, 200) // Light red
-    doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
-    doc.setTextColor(255, 0, 0) // Red
-    doc.setFontSize(8)
-    doc.text("Total Devuelto", currentX + 2, yOffset + 7)
-    doc.setFontSize(12)
-    doc.text(formatCurrency(dailySummary.totalDevuelto), currentX + 2, yOffset + 17)
-    currentX = 20 // Reset X for next row if needed
-    yOffset += cardHeight + cardSpacing + 5 // Move down for next section
+      // Monto Inicial
+      doc.setFillColor(230, 230, 250) // Light purple
+      doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+      doc.setTextColor(accentPurple[0], accentPurple[1], accentPurple[2])
+      doc.setFontSize(8)
+      doc.text("Monto Inicial", currentX + 2, yOffset + 7)
+      doc.setFontSize(12)
+      doc.text(formatCurrency(dailySummary.montoInicial), currentX + 2, yOffset + 17)
+      currentX += cardWidth + cardSpacing
 
-    // Total en Caja (Efectivo) - Highlighted
-    doc.setFillColor(primaryGreen[0], primaryGreen[1], primaryGreen[2]) // Green background
-    doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
-    doc.setTextColor(255, 255, 255) // White text
-    doc.setFontSize(12)
-    doc.text("TOTAL EN CAJA (EFECTIVO)", currentX + 5, yOffset + 10)
-    doc.setFontSize(20)
-    doc.text(formatCurrency(dailySummary.saldoFinal), currentX + 5, yOffset + 23)
-    yOffset += 30 + cardSpacing
+      // Total Efectivo
+      doc.setFillColor(200, 250, 200) // Light green
+      doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+      doc.setTextColor(primaryGreen[0], primaryGreen[1], primaryGreen[2])
+      doc.setFontSize(8)
+      doc.text("Total Efectivo", currentX + 2, yOffset + 7)
+      doc.setFontSize(12)
+      doc.text(formatCurrency(dailySummary.totalEfectivo), currentX + 2, yOffset + 17)
+      currentX += cardWidth + cardSpacing
 
-    // TOTAL GENERAL - Highlighted
-    doc.setFillColor(accentPurple[0], accentPurple[1], accentPurple[2]) // Purple background
-    doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
-    doc.setTextColor(255, 255, 255) // White text
-    doc.setFontSize(12)
-    doc.text("TOTAL GENERAL DEL DÍA", currentX + 5, yOffset + 10)
-    doc.setFontSize(20)
-    doc.text(formatCurrency(dailySummary.totalGeneral), currentX + 5, yOffset + 23)
-    yOffset += 30 + 15 // Move down for next section
+      // Total Transferencias
+      doc.setFillColor(200, 220, 255) // Light blue
+      doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+      doc.setTextColor(secondaryBlue[0], secondaryBlue[1], secondaryBlue[2])
+      doc.setFontSize(8)
+      doc.text("Total Transferencias", currentX + 2, yOffset + 7)
+      doc.setFontSize(12)
+      doc.text(formatCurrency(dailySummary.totalTransferencias), currentX + 2, yOffset + 17)
+      currentX += cardWidth + cardSpacing
 
-    doc.setTextColor(textColor[0], textColor[1], textColor[2]) // Reset text color
+      // Total Devuelto
+      doc.setFillColor(255, 200, 200) // Light red
+      doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+      doc.setTextColor(255, 0, 0) // Red
+      doc.setFontSize(8)
+      doc.text("Total Devuelto", currentX + 2, yOffset + 7)
+      doc.setFontSize(12)
+      doc.text(formatCurrency(dailySummary.totalDevuelto), currentX + 2, yOffset + 17)
+      currentX += cardWidth + cardSpacing
 
-    // --- Detalle de Transacciones ---
-    doc.setFontSize(18)
-    doc.setFont("helvetica", "bold")
-    doc.text("DETALLE DE TRANSACCIONES", 20, yOffset)
-    yOffset += 10
+      // Total Gastos Imprevistos
+      doc.setFillColor(255, 230, 200) // Light orange
+      doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
+      doc.setTextColor(255, 140, 0) // Dark orange
+      doc.setFontSize(8)
+      doc.text("Gastos Imprevistos", currentX + 2, yOffset + 7)
+      doc.setFontSize(12)
+      doc.text(formatCurrency(dailySummary.totalGastosImprevistos), currentX + 2, yOffset + 17)
+      currentX = 20 // Reset X for next row if needed
+      yOffset += cardHeight + cardSpacing + 5 // Move down for next section
 
-    const transactionsData = transactions.map((t) => [
-      t.cliente,
-      t.fecha
-        .split(" ")
-        .slice(-2)
-        .join(" "), // Hora
-      t.metodoPago === "efectivo" ? "Efectivo" : t.metodoPago === "tarjeta" ? "Tarjeta" : "Transferencia",
-      formatCurrency(t.montoRecibido),
-      formatCurrency(t.montoServicio),
-      t.metodoPago === "tarjeta" ? formatCurrency(t.montoServicio * 0.05) : "-",
-      formatCurrency(t.cambioEntregado),
-      t.quienAtendio,
-      t.observaciones,
-    ])
+      // Total en Caja (Efectivo) - Highlighted
+      doc.setFillColor(primaryGreen[0], primaryGreen[1], primaryGreen[2]) // Green background
+      doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
+      doc.setTextColor(255, 255, 255) // White text
+      doc.setFontSize(12)
+      doc.text("TOTAL EN CAJA (EFECTIVO)", currentX + 5, yOffset + 10)
+      doc.setFontSize(20)
+      doc.text(formatCurrency(dailySummary.saldoFinal), currentX + 5, yOffset + 23)
+      yOffset += 30 + cardSpacing
 
-    doc.autoTable({
-      startY: yOffset,
-      head: [["Cliente", "Hora", "Método", "Recibido", "Servicio", "Recargo", "Cambio", "Atendió", "Observaciones"]],
-      body: transactionsData,
-      theme: "striped", // Modern look with alternating row colors
-      headStyles: {
-        fillColor: headerBg, // Light gray header
-        textColor: textColor,
-        fontStyle: "bold",
-        fontSize: 8,
-      },
-      styles: {
-        fontSize: 7,
-        cellPadding: 2,
-        overflow: "linebreak", // Handle long text
-        halign: "left",
-      },
-      columnStyles: {
-        0: { cellWidth: 25 }, // Cliente
-        1: { cellWidth: 15 }, // Hora
-        2: { cellWidth: 15 }, // Método
-        3: { cellWidth: 18 }, // Recibido
-        4: { cellWidth: 18 }, // Servicio
-        5: { cellWidth: 15 }, // Recargo
-        6: { cellWidth: 15 }, // Cambio
-        7: { cellWidth: 20 }, // Atendió
-        8: { cellWidth: 30 }, // Observaciones
-      },
-      didDrawPage: (data: any) => {
-        // Footer for page numbers
-        doc.setFontSize(8)
-        doc.text(
-          "Página " + doc.internal.getNumberOfPages(),
-          doc.internal.pageSize.width - 20,
-          doc.internal.pageSize.height - 10,
-          { align: "right" },
-        )
-      },
-    })
+      // TOTAL GENERAL - Highlighted
+      doc.setFillColor(accentPurple[0], accentPurple[1], accentPurple[2]) // Purple background
+      doc.rect(currentX, yOffset, 170, 30, "F") // Wider card
+      doc.setTextColor(255, 255, 255) // White text
+      doc.setFontSize(12)
+      doc.text("TOTAL GENERAL DEL DÍA", currentX + 5, yOffset + 10)
+      doc.setFontSize(20)
+      doc.text(formatCurrency(dailySummary.totalGeneral), currentX + 5, yOffset + 23)
+      yOffset += 30 + 15 // Move down for next section
 
-    yOffset = (doc as any).autoTable.previous.finalY + 15 // Update yOffset after table
+      doc.setTextColor(textColor[0], textColor[1], textColor[2]) // Reset text color
 
-    // --- Estadísticas de Empleadas ---
-    doc.setFontSize(18)
-    doc.setFont("helvetica", "bold")
-    doc.text("ESTADÍSTICAS DE EMPLEADAS", 20, yOffset)
-    yOffset += 10
+      // --- Detalle de Transacciones ---
+      doc.setFontSize(18)
+      doc.setFont("helvetica", "bold")
+      doc.text("DETALLE DE TRANSACCIONES", 20, yOffset)
+      yOffset += 10
 
-    const clientesPorEmpleada = transactions.reduce(
-      (acc, transaction) => {
-        acc[transaction.quienAtendio] = (acc[transaction.quienAtendio] || 0) + 1
-        return acc
-      },
-      {} as Record<string, number>,
-    )
+      const transactionsData = transactions.map((t) => [
+        t.cliente,
+        t.fecha
+          .split(" ")
+          .slice(-2)
+          .join(" "), // Hora
+        t.metodoPago === "efectivo" ? "Efectivo" : t.metodoPago === "tarjeta" ? "Tarjeta" : "Transferencia",
+        formatCurrency(t.montoRecibido),
+        formatCurrency(t.montoServicio),
+        t.metodoPago === "tarjeta" ? formatCurrency(t.montoServicio * 0.05) : "-",
+        formatCurrency(t.cambioEntregado),
+        t.quienAtendio,
+        t.observaciones,
+      ])
 
-    const employeeStatsData = empleadas.map((empleada) => [empleada.nombre, clientesPorEmpleada[empleada.nombre] || 0])
-
-    doc.autoTable({
-      startY: yOffset,
-      head: [["Empleada", "Clientes Atendidos"]],
-      body: employeeStatsData,
-      theme: "striped",
-      headStyles: {
-        fillColor: headerBg,
-        textColor: textColor,
-        fontStyle: "bold",
-        fontSize: 8,
-      },
-      styles: {
-        fontSize: 8,
-        cellPadding: 2,
-      },
-      columnStyles: {
-        0: { cellWidth: 80 },
-        1: { cellWidth: 40, halign: "center" },
-      },
-      didDrawPage: (data: any) => {
-        doc.setFontSize(8)
-        doc.text(
-          "Página " + doc.internal.getNumberOfPages(),
-          doc.internal.pageSize.width - 20,
-          doc.internal.pageSize.height - 10,
-          { align: "right" },
-        )
-      },
-    })
-
-    doc.save(`reporte-salon-${dailySummary.fecha.replace(/\//g, "-")}.pdf`)
-  }
-
-  // Exportar a Excel
-  const exportToExcel = async () => {
-    const XLSX = await import("xlsx")
-
-    // Crear libro de trabajo
-    const workbook = XLSX.utils.book_new()
-
-    // Hoja de resumen
-    const resumenData = [
-      ["CONTROL DE CAJA - SALÓN"],
-      [`Fecha: ${dailySummary.fecha}`],
-      [""],
-      ["RESUMEN DEL DÍA"],
-      ["Monto Inicial", dailySummary.montoInicial],
-      ["Total Efectivo Recibido", dailySummary.totalEfectivo],
-      ["Total en Caja (Efectivo)", dailySummary.saldoFinal],
-      ["Total Transferencias", dailySummary.totalTransferencias],
-      ["Total Devuelto", dailySummary.totalDevuelto],
-      ["TOTAL GENERAL", dailySummary.totalGeneral],
-      ["Total de Transacciones", transactions.length],
-      ["Empleadas Registradas", empleadas.length],
-    ]
-
-    const resumenSheet = XLSX.utils.aoa_to_sheet(resumenData)
-    XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen")
-
-    // Hoja de transacciones
-    if (transactions.length > 0) {
-      const transaccionesData = [
-        [
-          "Cliente",
-          "Fecha y Hora",
-          "Método de Pago",
-          "Monto Recibido",
-          "Monto Servicio",
-          "Recargo",
-          "Cambio",
-          "Quien Atendió",
-          "Observaciones",
-        ],
-      ]
-
-      transactions.forEach((transaction) => {
-        transaccionesData.push([
-          transaction.cliente,
-          transaction.fecha,
-          transaction.metodoPago,
-          transaction.montoRecibido,
-          transaction.montoServicio,
-          transaction.metodoPago === "tarjeta" ? (transaction.montoServicio * 0.05).toFixed(2) : "0.00",
-          transaction.cambioEntregado,
-          transaction.quienAtendio,
-          transaction.observaciones,
-        ])
+      // Llamar a autoTable directamente, pasándole la instancia de doc
+      autoTable(doc, {
+        startY: yOffset,
+        head: [["Cliente", "Hora", "Método", "Recibido", "Servicio", "Recargo", "Cambio", "Atendió", "Observaciones"]],
+        body: transactionsData,
+        theme: "striped", // Modern look with alternating row colors
+        headStyles: {
+          fillColor: headerBg, // Light gray header
+          textColor: textColor,
+          fontStyle: "bold",
+          fontSize: 8,
+        },
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          overflow: "linebreak", // Handle long text
+          halign: "left",
+        },
+        columnStyles: {
+          0: { cellWidth: 25 }, // Cliente
+          1: { cellWidth: 15 }, // Hora
+          2: { cellWidth: 15 }, // Método
+          3: { cellWidth: 18 }, // Recibido
+          4: { cellWidth: 18 }, // Servicio
+          5: { cellWidth: 15 }, // Recargo
+          6: { cellWidth: 15 }, // Cambio
+          7: { cellWidth: 20 }, // Atendió
+          8: { cellWidth: 30 }, // Observaciones
+        },
+        didDrawPage: (data: any) => {
+          // Footer for page numbers
+          doc.setFontSize(8)
+          doc.text(
+            "Página " + doc.internal.getNumberOfPages(),
+            doc.internal.pageSize.width - 20,
+            doc.internal.pageSize.height - 10,
+            { align: "right" },
+          )
+        },
       })
 
-      const transaccionesSheet = XLSX.utils.aoa_to_sheet(transaccionesData)
-      XLSX.utils.book_append_sheet(workbook, transaccionesSheet, "Transacciones")
-    }
+      // Actualizar yOffset de forma segura
+      yOffset = (autoTable as any).previous?.finalY ? (autoTable as any).previous.finalY + 15 : yOffset + 50
+      console.log("yOffset después de la tabla de transacciones:", yOffset)
 
-    // Hoja de empleadas
-    if (empleadas.length > 0) {
-      const empleadasData = [["Nombre", "Fecha de Registro", "Clientes Atendidos"]]
+      // --- Detalle de Gastos Imprevistos ---
+      if (expenses.length > 0) {
+        doc.addPage() // Nueva página para gastos si hay muchos datos
+        yOffset = 20 // Reiniciar yOffset para la nueva página
+
+        doc.setFontSize(18)
+        doc.setFont("helvetica", "bold")
+        doc.text("DETALLE DE GASTOS IMPREVISTOS", 20, yOffset)
+        yOffset += 10
+
+        const expensesData = expenses.map((e) => [
+          e.fecha
+            .split(" ")
+            .slice(-2)
+            .join(" "), // Hora
+          formatCurrency(e.monto),
+          e.descripcion,
+        ])
+
+        autoTable(doc, {
+          startY: yOffset,
+          head: [["Hora", "Monto", "Descripción"]],
+          body: expensesData,
+          theme: "striped",
+          headStyles: {
+            fillColor: headerBg,
+            textColor: textColor,
+            fontStyle: "bold",
+            fontSize: 8,
+          },
+          styles: {
+            fontSize: 7,
+            cellPadding: 2,
+            overflow: "linebreak",
+            halign: "left",
+          },
+          columnStyles: {
+            0: { cellWidth: 20 }, // Hora
+            1: { cellWidth: 25 }, // Monto
+            2: { cellWidth: 140 }, // Descripción
+          },
+          didDrawPage: (data: any) => {
+            doc.setFontSize(8)
+            doc.text(
+              "Página " + doc.internal.getNumberOfPages(),
+              doc.internal.pageSize.width - 20,
+              doc.internal.pageSize.height - 10,
+              { align: "right" },
+            )
+          },
+        })
+        yOffset = (autoTable as any).previous?.finalY ? (autoTable as any).previous.finalY + 15 : yOffset + 50
+        console.log("yOffset después de la tabla de gastos:", yOffset)
+      }
+
+      // --- Estadísticas de Empleadas ---
+      // Asegurarse de que las estadísticas de empleadas comiencen en una nueva página si el contenido anterior es largo
+      if (yOffset > doc.internal.pageSize.height - 50) {
+        // Si queda poco espacio
+        doc.addPage()
+        yOffset = 20 // Reiniciar yOffset para la nueva página
+      }
+
+      doc.setFontSize(18)
+      doc.setFont("helvetica", "bold")
+      doc.text("ESTADÍSTICAS DE EMPLEADAS", 20, yOffset)
+      yOffset += 10
 
       const clientesPorEmpleada = transactions.reduce(
         (acc, transaction) => {
@@ -536,16 +597,167 @@ export default function SalonCashControl() {
         {} as Record<string, number>,
       )
 
-      empleadas.forEach((empleada) => {
-        empleadasData.push([empleada.nombre, empleada.fechaRegistro, clientesPorEmpleada[empleada.nombre] || 0])
+      const employeeStatsData = empleadas.map((empleada) => [
+        empleada.nombre,
+        clientesPorEmpleada[empleada.nombre] || 0,
+      ])
+
+      // Llamar a autoTable directamente, pasándole la instancia de doc
+      autoTable(doc, {
+        startY: yOffset,
+        head: [["Empleada", "Clientes Atendidos"]],
+        body: employeeStatsData,
+        theme: "striped",
+        headStyles: {
+          fillColor: headerBg,
+          textColor: textColor,
+          fontStyle: "bold",
+          fontSize: 8,
+        },
+        styles: {
+          fontSize: 8,
+          cellPadding: 2,
+        },
+        columnStyles: {
+          0: { cellWidth: 80 },
+          1: { cellWidth: 40, halign: "center" },
+        },
+        didDrawPage: (data: any) => {
+          doc.setFontSize(8)
+          doc.text(
+            "Página " + doc.internal.getNumberOfPages(), // Corrected line
+            doc.internal.pageSize.width - 20,
+            doc.internal.pageSize.height - 10,
+            { align: "right" },
+          )
+        },
       })
 
-      const empleadasSheet = XLSX.utils.aoa_to_sheet(empleadasData)
-      XLSX.utils.book_append_sheet(workbook, empleadasSheet, "Empleadas")
+      doc.save(`reporte-salon-${dailySummary.fecha.replace(/\//g, "-")}.pdf`)
+      console.log("PDF generado y guardado.")
+    } catch (error) {
+      console.error("Error durante la exportación a PDF:", error)
+      alert(
+        `Error al generar PDF: ${error instanceof Error ? error.message : String(error)}. Por favor, revise la consola para más detalles.`,
+      )
     }
+  }
 
-    // Guardar archivo
-    XLSX.writeFile(workbook, `control-caja-${dailySummary.fecha.replace(/\//g, "-")}.xlsx`)
+  // Exportar a Excel
+  const exportToExcel = async () => {
+    try {
+      console.log("Iniciando exportación a Excel...")
+      const XLSX = await import("xlsx")
+      console.log("XLSX importado:", XLSX)
+
+      // Crear libro de trabajo
+      const workbook = XLSX.utils.book_new()
+
+      // Hoja de resumen
+      const resumenData = [
+        ["CONTROL DE CAJA - SALÓN"],
+        [`Fecha: ${dailySummary.fecha}`],
+        [""],
+        ["RESUMEN DEL DÍA"],
+        ["Monto Inicial", formatCurrency(dailySummary.montoInicial)],
+        ["Total Efectivo Recibido", formatCurrency(dailySummary.totalEfectivo)],
+        ["Total en Caja (Efectivo)", formatCurrency(dailySummary.saldoFinal)],
+        ["Total Transferencias", formatCurrency(dailySummary.totalTransferencias)],
+        ["Total Devuelto", formatCurrency(dailySummary.totalDevuelto)],
+        ["Total Gastos Imprevistos", formatCurrency(dailySummary.totalGastosImprevistos)], // Nuevo campo
+        ["TOTAL GENERAL", formatCurrency(dailySummary.totalGeneral)],
+        ["Total de Transacciones", transactions.length],
+        ["Empleadas Registradas", empleadas.length],
+      ]
+
+      const resumenSheet = XLSX.utils.aoa_to_sheet(resumenData)
+      XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen")
+      console.log("Hoja 'Resumen' creada.")
+
+      // Hoja de transacciones
+      if (transactions.length > 0) {
+        const transaccionesData = [
+          [
+            "Cliente",
+            "Fecha y Hora",
+            "Método de Pago",
+            "Monto Recibido",
+            "Monto Servicio",
+            "Recargo",
+            "Cambio",
+            "Quien Atendió",
+            "Observaciones",
+          ],
+        ]
+
+        transactions.forEach((transaction) => {
+          transaccionesData.push([
+            transaction.cliente,
+            transaction.fecha,
+            transaction.metodoPago,
+            formatCurrency(transaction.montoRecibido), // Aplicar formato de moneda
+            formatCurrency(transaction.montoServicio), // Aplicar formato de moneda
+            transaction.metodoPago === "tarjeta" ? formatCurrency(transaction.montoServicio * 0.05) : "-", // Aplicar formato de moneda
+            formatCurrency(transaction.cambioEntregado), // Aplicar formato de moneda
+            transaction.quienAtendio,
+            transaction.observaciones,
+          ])
+        })
+
+        const transaccionesSheet = XLSX.utils.aoa_to_sheet(transaccionesData)
+        XLSX.utils.book_append_sheet(workbook, transaccionesSheet, "Transacciones")
+        console.log("Hoja 'Transacciones' creada.")
+      } else {
+        console.log("No hay transacciones para exportar a Excel.")
+      }
+
+      // Hoja de gastos imprevistos
+      if (expenses.length > 0) {
+        const expensesData = [["Fecha y Hora", "Monto", "Descripción"]]
+
+        expenses.forEach((expense) => {
+          expensesData.push([expense.fecha, formatCurrency(expense.monto), expense.descripcion])
+        })
+
+        const expensesSheet = XLSX.utils.aoa_to_sheet(expensesData)
+        XLSX.utils.book_append_sheet(workbook, expensesSheet, "Gastos Imprevistos")
+        console.log("Hoja 'Gastos Imprevistos' creada.")
+      } else {
+        console.log("No hay gastos imprevistos para exportar a Excel.")
+      }
+
+      // Hoja de empleadas
+      if (empleadas.length > 0) {
+        const empleadasData = [["Nombre", "Fecha de Registro", "Clientes Atendidos"]]
+
+        const clientesPorEmpleada = transactions.reduce(
+          (acc, transaction) => {
+            acc[transaction.quienAtendio] = (acc[transaction.quienAtendio] || 0) + 1
+            return acc
+          },
+          {} as Record<string, number>,
+        )
+
+        empleadas.forEach((empleada) => {
+          empleadasData.push([empleada.nombre, empleada.fechaRegistro, clientesPorEmpleada[empleada.nombre] || 0])
+        })
+
+        const empleadasSheet = XLSX.utils.aoa_to_sheet(empleadasData)
+        XLSX.utils.book_append_sheet(workbook, empleadasSheet, "Empleadas")
+        console.log("Hoja 'Empleadas' creada.")
+      } else {
+        console.log("No hay empleadas para exportar a Excel.")
+      }
+
+      // Guardar archivo
+      XLSX.writeFile(workbook, `control-caja-${dailySummary.fecha.replace(/\//g, "-")}.xlsx`)
+      console.log("Archivo Excel generado y guardado.")
+    } catch (error) {
+      console.error("Error durante la exportación a Excel:", error)
+      alert(
+        `Error al generar Excel: ${error instanceof Error ? error.message : String(error)}. Por favor, revise la consola para más detalles.`,
+      )
+    }
   }
 
   // Obtener color del método de pago
@@ -567,6 +779,7 @@ export default function SalonCashControl() {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "nueva-transaccion", label: "Nueva Transacción", icon: Plus },
     { id: "transacciones", label: "Transacciones", icon: Receipt },
+    { id: "gastos-imprevistos", label: "Gastos Imprevistos", icon: MinusCircle }, // Nuevo item de menú
     { id: "estadisticas", label: "Estadísticas", icon: BarChart3 },
     { id: "empleadas", label: "Empleadas", icon: UserPlus },
     { id: "configuracion", label: "Configuración", icon: Settings },
@@ -591,7 +804,7 @@ export default function SalonCashControl() {
               </CardHeader>
               <CardContent>
                 <div className="text-4xl font-bold">{formatCurrency(dailySummary.saldoFinal)}</div>
-                <p className="text-green-100 mt-1">Monto inicial + Efectivo recibido - Cambios entregados</p>
+                <p className="text-green-100 mt-1">Monto inicial + Efectivo recibido - Cambios entregados - Gastos</p>
               </CardContent>
             </Card>
 
@@ -623,9 +836,7 @@ export default function SalonCashControl() {
                   <CreditCard className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {formatCurrency(dailySummary.totalTransferencias)}
-                  </div>
+                  <div className="text-2xl font-bold">{formatCurrency(dailySummary.totalTransferencias)}</div>
                 </CardContent>
               </Card>
 
@@ -658,9 +869,11 @@ export default function SalonCashControl() {
                     <p className="text-xs text-purple-500 mt-1">Total del día</p>
                   </div>
                   <div className="text-center p-4 bg-orange-50 rounded-lg">
-                    <p className="text-sm text-orange-600 font-medium">Empleadas Activas</p>
-                    <p className="text-2xl font-bold text-orange-700">{empleadas.length}</p>
-                    <p className="text-xs text-orange-500 mt-1">Registradas</p>
+                    <p className="text-sm text-orange-600 font-medium">Gastos Imprevistos</p>
+                    <p className="text-2xl font-bold text-orange-700">
+                      {formatCurrency(dailySummary.totalGastosImprevistos)}
+                    </p>
+                    <p className="text-xs text-orange-500 mt-1">Dinero retirado de caja</p>
                   </div>
                 </div>
               </CardContent>
@@ -723,9 +936,18 @@ export default function SalonCashControl() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="efectivo">Efectivo</SelectItem>
-                      <SelectItem value="tarjeta">Tarjeta de Crédito</SelectItem>
-                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                      {/* eslint-disable-next-line tailwindcss/no-custom-classname */}
+                      <SelectItem value="efectivo" className="bg-green-100 text-green-800">
+                        Efectivo
+                      </SelectItem>
+                      {/* eslint-disable-next-line tailwindcss/no-custom-classname */}
+                      <SelectItem value="tarjeta" className="bg-blue-100 text-blue-800">
+                        Tarjeta de Crédito
+                      </SelectItem>
+                      {/* eslint-disable-next-line tailwindcss/no-custom-classname */}
+                      <SelectItem value="transferencia" className="bg-purple-100 text-purple-800">
+                        Transferencia
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1028,6 +1250,97 @@ export default function SalonCashControl() {
               </Dialog>
             </CardContent>
           </Card>
+        )
+
+      case "gastos-imprevistos": // Nueva sección para gastos
+        return (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MinusCircle className="h-5 w-5" />
+                  Registrar Gasto Imprevisto
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="expenseMonto">Monto del Gasto (RD$)</Label>
+                    <Input
+                      id="expenseMonto"
+                      type="number"
+                      value={newExpense.monto || ""}
+                      onChange={(e) => setNewExpense({ ...newExpense, monto: Number.parseFloat(e.target.value) || 0 })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label htmlFor="expenseDescripcion">Descripción del Gasto</Label>
+                    <Textarea
+                      id="expenseDescripcion"
+                      value={newExpense.descripcion}
+                      onChange={(e) => setNewExpense({ ...newExpense, descripcion: e.target.value })}
+                      placeholder="Ej: Compra de bombillo, reparación de silla, etc."
+                      rows={3}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <Button onClick={addExpense} className="w-full md:w-auto">
+                    <MinusCircle className="h-4 w-4 mr-2" />
+                    Registrar Gasto
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Historial de Gastos Imprevistos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha y Hora</TableHead>
+                        <TableHead>Monto</TableHead>
+                        <TableHead>Descripción</TableHead>
+                        <TableHead>Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {expenses.length > 0 ? (
+                        expenses.map((expense) => (
+                          <TableRow key={expense.id}>
+                            <TableCell className="font-mono text-sm">{expense.fecha}</TableCell>
+                            <TableCell className="font-medium text-red-600">{formatCurrency(expense.monto)}</TableCell>
+                            <TableCell className="max-w-xs">{expense.descripcion}</TableCell>
+                            <TableCell>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => deleteExpense(expense.id)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                            No hay gastos imprevistos registrados para hoy
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )
 
       case "estadisticas":
