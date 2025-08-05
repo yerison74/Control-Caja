@@ -110,9 +110,7 @@ export default function SalonCashControl() {
   })
   const [isLoading, setIsLoading] = useState(true)
 
-  // Nuevo estado para la fecha seleccionada (objeto Date)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
-  // Estado para mostrar la fecha formateada en la UI
   const [displayDate, setDisplayDate] = useState<string>(format(new Date(), "dd/MM/yyyy"))
 
   const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id" | "fecha">>({
@@ -1576,6 +1574,7 @@ export default function SalonCashControl() {
             {/* Header de escritorio */}
             <div className="hidden lg:flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">{getSectionTitle()}</h2>
+              {/* Este es el selector de fecha para escritorio */}
               <div className="flex items-center gap-2">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -1600,8 +1599,43 @@ export default function SalonCashControl() {
                     />
                   </PopoverContent>
                 </Popover>
-                {!isToday(selectedDate || new Date()) && ( // Mostrar botón solo si no es hoy
+                {!isToday(selectedDate || new Date()) && (
                   <Button onClick={goToCurrentDay} variant="outline">
+                    Ir a Hoy
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Selector de fecha para móvil */}
+            {/* Se muestra solo en pantallas pequeñas (hasta lg) */}
+            <div className="flex lg:hidden flex-col sm:flex-row items-center justify-between gap-2 mb-6">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full justify-start text-left font-normal", // w-full para móvil
+                        !selectedDate && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      initialFocus
+                      locale={es}
+                    />
+                  </PopoverContent>
+                </Popover>
+                {!isToday(selectedDate || new Date()) && (
+                  <Button onClick={goToCurrentDay} variant="outline" className="flex-shrink-0 bg-transparent">
                     Ir a Hoy
                   </Button>
                 )}
