@@ -4,8 +4,8 @@ import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Control De Gastos',
-  description: 'Creado por Yerison Javier',
+  title: 'Control De Caja',
+  description: 'Creado Por Yerison Javier',
 }
 
 export default function RootLayout({

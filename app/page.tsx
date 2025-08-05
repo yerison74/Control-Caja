@@ -237,6 +237,9 @@ export default function SalonCashControl() {
       let montoRecibidoFinal: number
       if (newTransaction.metodoPago === "tarjeta") {
         montoRecibidoFinal = newTransaction.montoServicio * 1.05
+      } else if (newTransaction.metodoPago === "transferencia") {
+        // <-- Nueva condición
+        montoRecibidoFinal = newTransaction.montoServicio // <-- Monto del servicio para transferencia
       } else {
         montoRecibidoFinal = newTransaction.montoRecibido
       }
@@ -1012,19 +1015,33 @@ export default function SalonCashControl() {
                     value={
                       newTransaction.metodoPago === "tarjeta"
                         ? (newTransaction.montoServicio * 1.05).toFixed(2)
-                        : newTransaction.montoRecibido || ""
+                        : newTransaction.metodoPago === "transferencia" // <-- Nueva condición
+                          ? newTransaction.montoServicio.toFixed(2) // <-- Auto-llenar con montoServicio
+                          : newTransaction.montoRecibido || ""
                     }
                     onChange={(e) =>
                       newTransaction.metodoPago !== "tarjeta" &&
+                      newTransaction.metodoPago !== "transferencia" && // <-- Excluir también transferencia
                       setNewTransaction({ ...newTransaction, montoRecibido: Number.parseFloat(e.target.value) || 0 })
                     }
                     placeholder="0.00"
-                    disabled={newTransaction.metodoPago === "tarjeta"}
-                    className={newTransaction.metodoPago === "tarjeta" ? "bg-blue-50" : ""}
+                    disabled={newTransaction.metodoPago === "tarjeta" || newTransaction.metodoPago === "transferencia"} // <-- Deshabilitar para ambos
+                    className={
+                      newTransaction.metodoPago === "tarjeta"
+                        ? "bg-blue-50"
+                        : newTransaction.metodoPago === "transferencia" // <-- Clase para transferencia
+                          ? "bg-purple-50"
+                          : ""
+                    }
                   />
                   {newTransaction.metodoPago === "efectivo" && (
                     <p className="text-xs text-gray-500 mt-1">
                       Ingrese el monto que recibió del cliente (puede ser mayor al servicio para dar cambio)
+                    </p>
+                  )}
+                  {newTransaction.metodoPago === "transferencia" && ( // <-- Nuevo texto de ayuda
+                    <p className="text-xs text-purple-600 mt-1">
+                      El monto recibido es igual al monto del servicio para transferencias.
                     </p>
                   )}
                 </div>
