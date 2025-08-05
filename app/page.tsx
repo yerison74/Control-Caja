@@ -110,6 +110,9 @@ export default function SalonCashControl() {
     totalGeneral: 0,
   })
   const [isLoading, setIsLoading] = useState(true)
+  const [isAddingTransaction, setIsAddingTransaction] = useState(false) // <-- Nuevo estado para la carga de transacción
+  const [isAddingExpense, setIsAddingExpense] = useState(false) // <-- Nuevo estado para la carga de gasto
+  const [isAddingEmpleada, setIsAddingEmpleada] = useState(false) // <-- Nuevo estado para la carga de empleada
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
   const [displayDate, setDisplayDate] = useState<string>(format(new Date(), "dd/MM/yyyy"))
@@ -195,12 +198,17 @@ export default function SalonCashControl() {
       return
     }
 
-    const result = await addEmpleadaAction(newEmpleada)
-    if (result.success && result.empleada) {
-      setEmpleadas((prev) => [...prev, result.empleada])
-      setNewEmpleada("")
-    } else {
-      alert(`Error al agregar empleada: ${result.error}`)
+    setIsAddingEmpleada(true) // Inicia el estado de carga
+    try {
+      const result = await addEmpleadaAction(newEmpleada)
+      if (result.success && result.empleada) {
+        setEmpleadas((prev) => [...prev, result.empleada])
+        setNewEmpleada("")
+      } else {
+        alert(`Error al agregar empleada: ${result.error}`)
+      }
+    } finally {
+      setIsAddingEmpleada(false) // Finaliza el estado de carga
     }
   }
 
@@ -223,48 +231,54 @@ export default function SalonCashControl() {
       return
     }
 
-    let montoRecibidoFinal: number
-    if (newTransaction.metodoPago === "tarjeta") {
-      montoRecibidoFinal = newTransaction.montoServicio * 1.05
-    } else {
-      montoRecibidoFinal = newTransaction.montoRecibido
-    }
+    setIsAddingTransaction(true) // Inicia el estado de carga
 
-    const transactionDataToSend = {
-      ...newTransaction,
-      montoRecibido: montoRecibidoFinal,
-      cambioEntregado:
-        newTransaction.metodoPago === "efectivo"
-          ? Math.max(0, newTransaction.montoRecibido - newTransaction.montoServicio)
-          : 0,
-    }
+    try {
+      let montoRecibidoFinal: number
+      if (newTransaction.metodoPago === "tarjeta") {
+        montoRecibidoFinal = newTransaction.montoServicio * 1.05
+      } else {
+        montoRecibidoFinal = newTransaction.montoRecibido
+      }
 
-    const result = await addTransactionAction(transactionDataToSend)
-    if (result.success && result.transaction) {
-      // Después de agregar, recargar los datos del día actual para reflejar el cambio
-      const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
-      if (updatedData.transactions) {
-        setTransactions(updatedData.transactions)
+      const transactionDataToSend = {
+        ...newTransaction,
+        montoRecibido: montoRecibidoFinal,
+        cambioEntregado:
+          newTransaction.metodoPago === "efectivo"
+            ? Math.max(0, newTransaction.montoRecibido - newTransaction.montoServicio)
+            : 0,
       }
-      if (updatedData.dailySummary) {
-        setDailySummary(updatedData.dailySummary)
+
+      const result = await addTransactionAction(transactionDataToSend)
+      if (result.success && result.transaction) {
+        // Después de agregar, recargar los datos del día actual para reflejar el cambio
+        const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+        if (updatedData.transactions) {
+          setTransactions(updatedData.transactions)
+        }
+        if (updatedData.dailySummary) {
+          setDailySummary(updatedData.dailySummary)
+        }
+        if (updatedData.expenses) {
+          setExpenses(updatedData.expenses)
+        }
+        setNewTransaction({
+          cliente: "",
+          metodoPago: "efectivo",
+          montoRecibido: 0,
+          montoServicio: 0,
+          cambioEntregado: 0,
+          quienAtendio: "",
+          observaciones: "",
+        })
+        setActiveSection("transacciones")
+        setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
+      } else {
+        alert(`Error al agregar transacción: ${result.error}`)
       }
-      if (updatedData.expenses) {
-        setExpenses(updatedData.expenses)
-      }
-      setNewTransaction({
-        cliente: "",
-        metodoPago: "efectivo",
-        montoRecibido: 0,
-        montoServicio: 0,
-        cambioEntregado: 0,
-        quienAtendio: "",
-        observaciones: "",
-      })
-      setActiveSection("transacciones")
-      setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
-    } else {
-      alert(`Error al agregar transacción: ${result.error}`)
+    } finally {
+      setIsAddingTransaction(false) // Finaliza el estado de carga
     }
   }
 
@@ -275,23 +289,29 @@ export default function SalonCashControl() {
       return
     }
 
-    const result = await addExpenseAction(newExpense)
-    if (result.success && result.expense) {
-      // Después de agregar, recargar los datos del día actual para reflejar el cambio
-      const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
-      if (updatedData.expenses) {
-        setExpenses(updatedData.expenses)
+    setIsAddingExpense(true) // Inicia el estado de carga
+
+    try {
+      const result = await addExpenseAction(newExpense)
+      if (result.success && result.expense) {
+        // Después de agregar, recargar los datos del día actual para reflejar el cambio
+        const updatedData = await getInitialData(format(new Date(), "dd/MM/yyyy"))
+        if (updatedData.expenses) {
+          setExpenses(updatedData.expenses)
+        }
+        if (updatedData.dailySummary) {
+          setDailySummary(updatedData.dailySummary)
+        }
+        if (updatedData.transactions) {
+          setTransactions(updatedData.transactions)
+        }
+        setNewExpense({ monto: 0, descripcion: "" })
+        setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
+      } else {
+        alert(`Error al agregar gasto: ${result.error}`)
       }
-      if (updatedData.dailySummary) {
-        setDailySummary(updatedData.dailySummary)
-      }
-      if (updatedData.transactions) {
-        setTransactions(updatedData.transactions)
-      }
-      setNewExpense({ monto: 0, descripcion: "" })
-      setSelectedDate(new Date()) // Asegurarse de que se muestre el día actual
-    } else {
-      alert(`Error al agregar gasto: ${result.error}`)
+    } finally {
+      setIsAddingExpense(false) // Finaliza el estado de carga
     }
   }
 
@@ -1089,9 +1109,18 @@ export default function SalonCashControl() {
               </div>
 
               <div className="mt-4">
-                <Button onClick={addTransaction} className="w-full md:w-auto">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Transacción
+                <Button onClick={addTransaction} className="w-full md:w-auto" disabled={isAddingTransaction}>
+                  {isAddingTransaction ? (
+                    <>
+                      <Plus className="h-4 w-4 mr-2 animate-pulse" />
+                      Agregando...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Agregar Transacción
+                    </>
+                  )}
                 </Button>
               </div>
             </CardContent>
@@ -1119,12 +1148,22 @@ export default function SalonCashControl() {
                       onChange={(e) => setNewEmpleada(e.target.value)}
                       placeholder="Ingrese el nombre completo"
                       onKeyPress={(e) => e.key === "Enter" && addEmpleada()}
+                      disabled={isAddingEmpleada} // Deshabilita el input mientras se agrega
                     />
                   </div>
                   <div className="flex items-end">
-                    <Button onClick={addEmpleada}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Agregar
+                    <Button onClick={addEmpleada} disabled={isAddingEmpleada}>
+                      {isAddingEmpleada ? (
+                        <>
+                          <Plus className="h-4 w-4 mr-2 animate-pulse" />
+                          Agregando...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Agregar
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -1299,6 +1338,7 @@ export default function SalonCashControl() {
                       value={newExpense.monto || ""}
                       onChange={(e) => setNewExpense({ ...newExpense, monto: Number.parseFloat(e.target.value) || 0 })}
                       placeholder="0.00"
+                      disabled={isAddingExpense} // Deshabilita el input mientras se agrega
                     />
                   </div>
                   <div className="md:col-span-2">
@@ -1309,13 +1349,23 @@ export default function SalonCashControl() {
                       onChange={(e) => setNewExpense({ ...newExpense, descripcion: e.target.value })}
                       placeholder="Ej: Compra de bombillo, reparación de silla, etc."
                       rows={3}
+                      disabled={isAddingExpense} // Deshabilita el textarea mientras se agrega
                     />
                   </div>
                 </div>
                 <div className="mt-4">
-                  <Button onClick={addExpense} className="w-full md:w-auto">
-                    <MinusCircle className="h-4 w-4 mr-2" />
-                    Registrar Gasto
+                  <Button onClick={addExpense} className="w-full md:w-auto" disabled={isAddingExpense}>
+                    {isAddingExpense ? (
+                      <>
+                        <MinusCircle className="h-4 w-4 mr-2 animate-pulse" />
+                        Registrando...
+                      </>
+                    ) : (
+                      <>
+                        <MinusCircle className="h-4 w-4 mr-2" />
+                        Registrar Gasto
+                      </>
+                    )}
                   </Button>
                 </div>
               </CardContent>
