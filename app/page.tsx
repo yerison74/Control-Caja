@@ -381,7 +381,7 @@ export default function SalonCashControl() {
       const cardHeight = 25
       const cardSpacing = 5
       let currentX = 20
- 
+
       // Monto Inicial
       doc.setFillColor(230, 230, 250) // Light purple
       doc.rect(currentX, yOffset, cardWidth, cardHeight, "F")
