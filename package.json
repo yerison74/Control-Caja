@@ -44,6 +44,7 @@
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
     "date-fns": "latest",
+    "date-fns-tz": "latest",
     "embla-carousel-react": "8.5.1",
     "gcp-metadata": "latest",
     "geist": "^1.3.1",

@@ -2,7 +2,10 @@
 
 import { connectToDatabase } from "@/lib/mongodb"
 import type { ObjectId } from "mongodb"
-import { format } from "date-fns"
+import { formatInTimeZone } from "date-fns-tz" // <-- Nueva importación
+
+// Define la zona horaria de República Dominicana
+const DOMINICAN_REPUBLIC_TIMEZONE = "America/Santo_Domingo"
 
 // Interfaces (replicadas aquí para el contexto del servidor)
 interface Transaction {
@@ -86,7 +89,8 @@ export async function getInitialData(dateToLoad?: string) {
     const empleadasCollection = db.collection<Empleada>("empleadas")
     const expensesCollection = db.collection<Expense>("expenses")
 
-    const todayFormatted = format(new Date(), "dd/MM/yyyy")
+    // Formatear la fecha actual en la zona horaria de RD para consistencia
+    const todayFormatted = formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy")
     const targetDate = dateToLoad || todayFormatted // Usa la fecha proporcionada o la actual
 
     // Filtra transacciones y gastos por la fecha objetivo
@@ -156,7 +160,7 @@ export async function getInitialData(dateToLoad?: string) {
     return {
       transactions: [],
       dailySummary: {
-        fecha: dateToLoad || format(new Date(), "dd/MM/yyyy"),
+        fecha: dateToLoad || formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy"), // Usa formatInTimeZone
         montoInicial: 4090,
         totalEfectivo: 0,
         totalTransferencias: 0,
@@ -181,11 +185,12 @@ export async function addTransactionAction(newTransactionData: Omit<Transaction,
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
     const expensesCollection = db.collection<Expense>("expenses")
 
-    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
+    // Formatear la fecha actual en la zona horaria de RD para consistencia
+    const today = formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy")
     const transaction: Transaction = {
       ...newTransactionData,
       id: Date.now().toString(),
-      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"), // Fecha y hora actual
+      fecha: formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy hh:mm a"), // <-- Usa formatInTimeZone
     }
 
     await transactionsCollection.insertOne(transaction)
@@ -231,7 +236,7 @@ export async function deleteTransactionAction(id: string) {
     await transactionsCollection.deleteOne({ id: id })
 
     // Recalcular y actualizar el resumen diario para HOY
-    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
+    const today = formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy") // Usa formatInTimeZone
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
     const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
     const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
@@ -271,7 +276,7 @@ export async function addEmpleadaAction(newEmpleadaName: string) {
     const empleada: Empleada = {
       id: Date.now().toString(),
       nombre: newEmpleadaName.trim(),
-      fechaRegistro: format(new Date(), "dd/MM/yyyy"),
+      fechaRegistro: formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy"), // Usa formatInTimeZone
     }
 
     await empleadasCollection.insertOne(empleada)
@@ -304,11 +309,11 @@ export async function addExpenseAction(newExpenseData: Omit<Expense, "_id" | "fe
     const transactionsCollection = db.collection<Transaction>("transactions")
     const dailySummaryCollection = db.collection<DailySummary>("dailySummaries")
 
-    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
+    const today = formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy") // Usa formatInTimeZone
     const expense: Expense = {
       ...newExpenseData,
       id: Date.now().toString(),
-      fecha: format(new Date(), "dd/MM/yyyy hh:mm a"), // Fecha y hora actual
+      fecha: formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy hh:mm a"), // <-- Usa formatInTimeZone
     }
 
     await expensesCollection.insertOne(expense)
@@ -354,7 +359,7 @@ export async function deleteExpenseAction(id: string) {
     await expensesCollection.deleteOne({ id: id })
 
     // Recalcular y actualizar el resumen diario para HOY
-    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
+    const today = formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy") // Usa formatInTimeZone
     const currentSummary = await dailySummaryCollection.findOne({ fecha: today })
     const allTransactionsToday = await transactionsCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
     const allExpensesToday = await expensesCollection.find({ fecha: { $regex: `^${today}` } }).toArray()
@@ -394,7 +399,7 @@ export async function updateInitialAmountAction(newAmount: number) {
     const transactionsCollection = db.collection<Transaction>("transactions")
     const expensesCollection = db.collection<Expense>("expenses")
 
-    const today = format(new Date(), "dd/MM/yyyy") // Siempre el día actual
+    const today = formatInTimeZone(new Date(), DOMINICAN_REPUBLIC_TIMEZONE, "dd/MM/yyyy") // Usa formatInTimeZone
     let dailySummary = await dailySummaryCollection.findOne({ fecha: today })
 
     if (!dailySummary) {
