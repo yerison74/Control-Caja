@@ -98,10 +98,16 @@ export async function getInitialData(dateToLoad?: string) {
     let dailySummary = await dailySummaryCollection.findOne({ fecha: targetDate })
 
     if (!dailySummary) {
-      // Si no hay resumen para la fecha objetivo, crea uno por defecto
+      // Antes de crear el resumen por defecto, verifica si hay actividad para esta fecha
+      const transactionsForTargetDate = await transactionsCollection
+        .find({ fecha: { $regex: `^${targetDate}` } })
+        .toArray()
+      const expensesForTargetDate = await expensesCollection.find({ fecha: { $regex: `^${targetDate}` } }).toArray()
+
       const defaultSummary: DailySummary = {
         fecha: targetDate,
-        montoInicial: 4090, // Default initial amount
+        // Si no hay transacciones ni gastos, el monto inicial es 0, de lo contrario, 4090
+        montoInicial: transactionsForTargetDate.length === 0 && expensesForTargetDate.length === 0 ? 0 : 4090,
         totalEfectivo: 0,
         totalTransferencias: 0,
         totalDevuelto: 0,
@@ -442,5 +448,47 @@ export async function updateInitialAmountAction(newAmount: number) {
   } catch (error) {
     console.error("Error updating initial amount:", error)
     return { success: false, error: "Failed to update initial amount" }
+  }
+}
+
+// --- UTILITY FUNCTIONS ---
+export async function getDatesWithActivity() {
+  try {
+    const { db } = await connectToDatabase()
+    const transactionsCollection = db.collection<Transaction>("transactions")
+    const expensesCollection = db.collection<Expense>("expenses")
+
+    // Get distinct dates from transactions
+    const transactionDates = await transactionsCollection
+      .aggregate([
+        {
+          $group: {
+            _id: { $substrCP: ["$fecha", 0, 10] }, // Extract "dd/MM/yyyy" part
+          },
+        },
+        { $project: { _id: 0, date: "$_id" } },
+      ])
+      .toArray()
+
+    // Get distinct dates from expenses
+    const expenseDates = await expensesCollection
+      .aggregate([
+        {
+          $group: {
+            _id: { $substrCP: ["$fecha", 0, 10] }, // Extract "dd/MM/yyyy" part
+          },
+        },
+        { $project: { _id: 0, date: "$_id" } },
+      ])
+      .toArray()
+
+    // Combine and get unique dates
+    const allDates = [...transactionDates, ...expenseDates].map((d) => d.date)
+    const uniqueDates = Array.from(new Set(allDates))
+
+    return { success: true, dates: uniqueDates }
+  } catch (error) {
+    console.error("Error fetching dates with activity:", error)
+    return { success: false, dates: [], error: "Failed to fetch active dates" }
   }
 }

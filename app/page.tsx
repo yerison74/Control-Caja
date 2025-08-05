@@ -36,6 +36,7 @@ import {
   updateInitialAmountAction,
   addExpenseAction,
   deleteExpenseAction,
+  getDatesWithActivity, // <-- Añade esta importación
 } from "@/actions" // Import Server Actions
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -112,6 +113,7 @@ export default function SalonCashControl() {
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
   const [displayDate, setDisplayDate] = useState<string>(format(new Date(), "dd/MM/yyyy"))
+  const [activeDates, setActiveDates] = useState<Date[]>([]) // <-- Nuevo estado
 
   const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id" | "fecha">>({
     cliente: "",
@@ -162,6 +164,24 @@ export default function SalonCashControl() {
     }
     loadData()
   }, [selectedDate]) // Dependencia de selectedDate
+
+  // Nuevo useEffect para cargar las fechas con actividad
+  useEffect(() => {
+    const fetchActiveDates = async () => {
+      const result = await getDatesWithActivity()
+      if (result.success) {
+        // Convertir las cadenas de fecha a objetos Date
+        const datesAsObjects = result.dates.map((dateStr) => {
+          const [day, month, year] = dateStr.split("/").map(Number)
+          return new Date(year, month - 1, day) // Meses son 0-indexados
+        })
+        setActiveDates(datesAsObjects)
+      } else {
+        console.error("Error al obtener fechas con actividad:", result.error)
+      }
+    }
+    fetchActiveDates()
+  }, []) // Se ejecuta solo una vez al montar el componente
 
   // Función para volver al día actual
   const goToCurrentDay = () => {
@@ -1596,6 +1616,15 @@ export default function SalonCashControl() {
                       onSelect={setSelectedDate}
                       initialFocus
                       locale={es} // Establecer el idioma español
+                      modifiers={{
+                        active: activeDates, // <-- Añade este modificador
+                      }}
+                      modifiersStyles={{
+                        active: {
+                          backgroundColor: "hsl(var(--primary))", // Color de fondo para días activos
+                          color: "hsl(var(--primary-foreground))", // Color del texto para días activos
+                        },
+                      }}
                     />
                   </PopoverContent>
                 </Popover>
@@ -1631,6 +1660,15 @@ export default function SalonCashControl() {
                       onSelect={setSelectedDate}
                       initialFocus
                       locale={es}
+                      modifiers={{
+                        active: activeDates, // <-- Añade este modificador
+                      }}
+                      modifiersStyles={{
+                        active: {
+                          backgroundColor: "hsl(var(--primary))", // Color de fondo para días activos
+                          color: "hsl(var(--primary-foreground))", // Color del texto para días activos
+                        },
+                      }}
                     />
                   </PopoverContent>
                 </Popover>
